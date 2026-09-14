@@ -1,27 +1,30 @@
-/// Home dashboard screen.
+/// Home dashboard - today's status, check-in CTA, baseline progress,
+/// next action and weekly snapshot. All numbers come from the backend
+/// (`/dashboard/today`, `/coach/next-action`, `/coach/weekly-summary`).
 ///
-/// Shows a lifestyle score computed ONLY from the user's own check-in data
-/// (missing metrics keep a "no data yet" state - nothing is ever invented),
-/// today's observed values, a daily check-in CTA and baseline progress.
+/// NULL values are rendered as "Not logged" - never as zero.
 library;
-
-import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/app_strings.dart';
+import '../../core/network/api_exception.dart';
 import '../../core/utils/date_utils.dart';
 import '../../models/app_enums.dart';
+import '../../models/coach.dart';
 import '../../models/dashboard.dart';
 import '../../models/health_data.dart';
 import '../../providers/auth_provider.dart';
+import '../../repositories/coach_repository.dart';
 import '../../repositories/health_repository.dart';
 import '../../services/health_connect_service.dart';
+import '../../widgets/app_bottom_bar.dart';
 import '../../widgets/app_logo.dart';
+import '../../widgets/error_message.dart';
 import '../../widgets/metric_card.dart';
+import '../../widgets/primary_button.dart';
 import '../../widgets/progress_card.dart';
 import '../../widgets/section_header.dart';
 import '../../app.dart';
@@ -31,7 +34,7 @@ import '../history/history_screen.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.onOpenProfile});
 
-  /// Invoked when the user taps the profile header icon (switches tab).
+  /// Invoked when the user taps the profile header avatar.
   final VoidCallback? onOpenProfile;
 
   @override
@@ -40,14 +43,20 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   DashboardData? _dashboard;
+  NextAction? _nextAction;
+  WeeklySummary? _weekly;
   bool _loading = true;
+  bool _weeklyLoading = true;
+  bool _refreshingHealth = false;
   String? _error;
+  String? _healthNote;
 
   @override
   void initState() {
     super.initState();
     _load();
     _syncHealth();
+    _loadCoachExtras();
   }
 
   Future<void> _load() async {
@@ -57,28 +66,54 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final svc = AppServices.instance;
-      final repo = HealthRepository(svc.api);
-      final data = await repo.dashboardToday();
+      final data = await HealthRepository(svc.api).dashboardToday();
       if (mounted) setState(() => _dashboard = data);
     } catch (_) {
       if (mounted && _dashboard == null) {
         setState(() => _error = AppStrings.apiUnavailable);
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
+  Future<void> _loadCoachExtras() async {
+    setState(() => _weeklyLoading = _weekly == null);
+    try {
+      final repo = CoachRepository(AppServices.instance.api);
+      final results = await Future.wait([
+        repo.nextAction(),
+        repo.weeklySummary(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _nextAction = results[0] as NextAction;
+        _weekly = results[1] as WeeklySummary;
+        _weeklyLoading = false;
+      });
+    } catch (_) {
+      // Coach extras are supplementary; the dashboard still renders.
+      if (mounted) setState(() => _weeklyLoading = false);
+    }
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([_load(), _loadCoachExtras()]);
+  }
+
+  /// Best-effort Health Connect sync when a backend connection exists.
   Future<void> _syncHealth() async {
     try {
+      setState(() => _refreshingHealth = true);
       final svc = AppServices.instance;
       final healthRepo = HealthRepository(svc.api);
       final conn = await healthRepo.getStatus();
-      if (!conn.isConnected) return;
+      if (!conn.isConnected) {
+        if (mounted) {
+          setState(() => _healthNote = 'connect');
+        }
+        return;
+      }
 
       final health = HealthConnectService.instance;
       final availability = health.availability ?? await health.setup();
@@ -87,7 +122,9 @@ class _HomeScreenState extends State<HomeScreen> {
       final now = DateTime.now();
       final midnight = DateTime(now.year, now.month, now.day);
       final dayData = await health.readDay(midnight);
-      if (dayData.steps == null && dayData.activeMinutes == null && dayData.sleepMinutes == null) {
+      if (dayData.steps == null &&
+          dayData.activeMinutes == null &&
+          dayData.sleepMinutes == null) {
         return;
       }
 
@@ -95,53 +132,14 @@ class _HomeScreenState extends State<HomeScreen> {
         steps: dayData.steps,
         activeMinutes: dayData.activeMinutes,
         sleepMinutes: dayData.sleepMinutes,
+        date: AppDateUtils.todayIso(),
       );
       await _load();
     } catch (_) {
-      // Health sync is best-effort; never block dashboard rendering.
+      if (mounted) setState(() => _healthNote = 'sync');
+    } finally {
+      if (mounted) setState(() => _refreshingHealth = false);
     }
-  }
-
-  String get _greeting {
-    final h = DateTime.now().hour;
-    if (h < 12) return AppStrings.morningHello;
-    if (h < 17) return AppStrings.afternoonHello;
-    return AppStrings.eveningHello;
-  }
-
-  /// Transparent "lifestyle score": an average of the user's OWN recorded
-  /// metrics only. Never shows a value when there is no data.
-  ({double? score, String? label}) _score(DashboardSummary? s) {
-    if (s == null) {
-      return (score: null, label: null);
-    }
-
-    final parts = <double>[];
-    final sleep = s.sleepHours;
-    if (sleep != null) {
-      parts.add((100 - (sleep - 7.5).abs() * 12.5).clamp(0, 100).toDouble());
-    }
-    final energy = s.energy;
-    if (energy != null) parts.add((energy * 10).clamp(0, 100).toDouble());
-    final stress = s.stress;
-    if (stress != null) parts.add(((6 - stress) / 5 * 100).clamp(0, 100).toDouble());
-    final steps = s.steps;
-    if (steps != null) parts.add((steps / 8000 * 100).clamp(0, 100).toDouble());
-    final active = s.activeMinutes;
-    if (active != null) parts.add((active / 30 * 100).clamp(0, 100).toDouble());
-    final water = s.waterLiters;
-    if (water != null) parts.add((water / 2 * 100).clamp(0, 100).toDouble());
-
-    if (parts.isEmpty) return (score: null, label: null);
-    final avg = parts.reduce((a, b) => a + b) / parts.length;
-    final label = avg >= 80
-        ? 'Good'
-        : avg >= 60
-            ? 'Fair'
-            : avg >= 40
-                ? 'Needs attention'
-                : 'Getting started';
-    return (score: avg.roundToDouble(), label: label);
   }
 
   Future<void> _openCheckin() async {
@@ -151,49 +149,75 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) _load();
   }
 
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 12) return AppStrings.morningHello;
+    if (h < 17) return AppStrings.afternoonHello;
+    return AppStrings.eveningHello;
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final auth = context.watch<AuthProvider>();
     final s = _dashboard?.summary;
-    final score = _score(s);
 
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: _refreshAll,
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           SliverSafeArea(
             sliver: SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-              sliver: SliverToBoxAdapter(child: _header(scheme, auth)),
+              sliver: SliverToBoxAdapter(
+                  child: _header(scheme, auth, s)),
             ),
           ),
+          if (_healthNote == 'connect')
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              sliver: SliverToBoxAdapter(
+                child: _HealthNoteCard(
+                  icon: Icons.watch_rounded,
+                  message:
+                      'Health Connect is available but not linked yet. Link it from your profile to auto-fill steps, sleep and activity.',
+                  actionLabel: 'Link later',
+                ),
+              ),
+            ),
+          if (_healthNote == 'sync')
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              sliver: SliverToBoxAdapter(
+                child: _HealthNoteCard(
+                  icon: Icons.sync_problem_rounded,
+                  message:
+                      'A Health Connect sync failed. Your manual entries are safe - we will retry next time.',
+                  actionLabel: 'Dismiss',
+                  onAction: () => setState(() => _healthNote = null),
+                ),
+              ),
+            ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             sliver: SliverToBoxAdapter(
-              child: _LifestyleScoreCard(
-                score: score.score,
-                label: score.label,
-                hasAnyData: _dashboard?.hasData ?? false,
+              child: _TodayCard(
+                summary: s,
+                hasData: _dashboard?.hasData ?? false,
                 loading: _loading,
+                onCheckin: _openCheckin,
               ),
             ),
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
             sliver: SliverToBoxAdapter(
-              child: _CheckinCtaCard(onTap: _openCheckin),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-            sliver: SliverToBoxAdapter(
               child: SectionHeader(
                 title: AppStrings.todayOverview,
                 subtitle: _dashboard?.hasData == true
-                    ? 'Data for ${AppDateUtils.shortDay(s!.date)}'
-                    : AppStrings.lifestyleScoreCaption,
+                    ? 'Data for ${AppDateUtils.fullDay(s!.date)}'
+                    : 'Your day at a glance',
               ),
             ),
           ),
@@ -251,7 +275,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     unit: '/10',
                     icon: Icons.bolt_rounded,
                     isEmpty: s?.energy == null,
-                    status: _levelStatus(s?.energy, 3, 7),
                   ),
                   MetricCard(
                     title: 'Stress',
@@ -259,11 +282,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     unit: '/5',
                     icon: Icons.spa_outlined,
                     isEmpty: s?.stress == null,
-                    status: _levelStatus(s?.stress, 3, 4, invert: true),
                   ),
                   MetricCard(
                     title: 'Hydration',
-                    value: s?.waterLiters != null ? '${(s!.waterLiters! * 4).round()}' : '',
+                    value: s?.waterLiters != null
+                        ? '${(s!.waterLiters! * 4).round()}'
+                        : '',
                     unit: 'cups',
                     icon: Icons.water_drop_outlined,
                     isEmpty: s?.waterLiters == null,
@@ -271,61 +295,131 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-          if (!_loading && _error == null) ...[
+          if (!_loading && _error == null && _dashboard != null) ...[
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               sliver: SliverToBoxAdapter(
                 child: ProgressCard(baseline: _dashboard!.baseline),
               ),
             ),
+            if (_nextAction != null)
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                sliver: SliverToBoxAdapter(
+                  child: _NextActionCard(action: _nextAction!),
+                ),
+              ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              sliver: SliverToBoxAdapter(
+                child: _WeeklySnapshotCard(
+                  weekly: _weekly,
+                  loading: _weeklyLoading,
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              sliver: SliverToBoxAdapter(
+                child: AppCard(
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(Icons.history_rounded,
+                            size: 20, color: scheme.primary),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Text(
+                          'Browse past check-ins',
+                          style: TextStyle(
+                              fontSize: 14.5, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded,
+                          color: scheme.onSurfaceVariant),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
-          const SliverToBoxAdapter(child: SizedBox(height: 32)),
+          const SliverToBoxAdapter(
+              child: SizedBox(height: appBottomBarClearance)),
         ],
       ),
     );
   }
 
-  Widget _header(ColorScheme scheme, AuthProvider auth) {
-    final firstName = (auth.user?.name ?? auth.user?.email ?? 'there').split(' ').first;
+  Widget _header(ColorScheme scheme, AuthProvider auth, DashboardSummary? s) {
+    final user = auth.user;
+    final firstName =
+        (user?.name ?? user?.email ?? 'there').split(' ').first;
+    final today = DateTime.now();
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const LogoMark(size: 38),
+        InkWell(
+          onTap: widget.onOpenProfile,
+          borderRadius: BorderRadius.circular(999),
+          child: CircleAvatar(
+            radius: 21,
+            backgroundColor: scheme.primaryContainer,
+            child: Text(
+              firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
+              style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  color: scheme.primary),
+            ),
+          ),
+        ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '$_greeting, $firstName \ud83d\udc4b',
+                '$_greeting, $firstName',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3),
               ),
               const SizedBox(height: 2),
               Text(
-                AppStrings.dashboardTitle,
+                '${AppDateUtils.fullDay(today)} \u00b7 Let\u2019s see how your habits are looking',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 13.5, color: scheme.onSurfaceVariant),
+                style: TextStyle(
+                    fontSize: 12.5, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
         ),
         const SizedBox(width: 8),
-        _HeaderIcon(
-          icon: Icons.notifications_outlined,
-          tooltip: AppStrings.notifications,
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const HistoryScreen()),
+        if (_refreshingHealth)
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        else
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _refreshAll,
+            icon: const Icon(Icons.refresh_rounded),
           ),
-        ),
-        const SizedBox(width: 4),
-        _HeaderIcon(
-          icon: Icons.account_circle_outlined,
-          tooltip: AppStrings.profileSheet,
-          onTap: widget.onOpenProfile,
-        ),
       ],
     );
   }
@@ -334,254 +428,246 @@ class _HomeScreenState extends State<HomeScreen> {
     if (steps == null) return null;
     return steps >= 8000 ? 'Good' : steps >= 5000 ? 'Moderate' : 'Low';
   }
-
-  /// Derive a Low / Medium / High label from a 1..[maxScale] rating.
-  String? _levelStatus(int? value, int lowCutoff, int highCutoff, {bool invert = false}) {
-    if (value == null) return null;
-    if (invert) {
-      return value <= lowCutoff ? 'Low' : value <= highCutoff ? 'Medium' : 'High';
-    }
-    return value <= lowCutoff ? 'Low' : value <= highCutoff ? 'Medium' : 'High';
-  }
 }
 
-class _HeaderIcon extends StatelessWidget {
-  const _HeaderIcon({required this.icon, required this.tooltip, this.onTap});
+class _HealthNoteCard extends StatelessWidget {
+  const _HealthNoteCard({
+    required this.icon,
+    required this.message,
+    required this.actionLabel,
+    this.onAction,
+  });
 
   final IconData icon;
-  final String tooltip;
-  final VoidCallback? onTap;
+  final String message;
+  final String actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerLow,
-      shape: const CircleBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(9),
-          child: Icon(icon, size: 22, color: scheme.onSurfaceVariant),
-        ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: scheme.secondary.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: scheme.primary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(fontSize: 13, height: 1.4),
+            ),
+          ),
+          TextButton(
+            onPressed: onAction ?? () {},
+            child: Text(actionLabel, style: const TextStyle(fontSize: 12.5)),
+          ),
+        ],
       ),
     );
   }
 }
 
-/// Hero Lifestyle Score card with a circular progress ring.
-class _LifestyleScoreCard extends StatelessWidget {
-  const _LifestyleScoreCard({
-    required this.score,
-    required this.label,
-    required this.hasAnyData,
+class _TodayCard extends StatelessWidget {
+  const _TodayCard({
+    required this.summary,
+    required this.hasData,
     required this.loading,
+    required this.onCheckin,
   });
 
-  final double? score;
-  final String? label;
-  final bool hasAnyData;
+  final DashboardSummary? summary;
+  final bool hasData;
   final bool loading;
+  final VoidCallback onCheckin;
 
   @override
   Widget build(BuildContext context) {
-    final showValue = hasAnyData && score != null;
-
+    final scheme = Theme.of(context).colorScheme;
+    final checkedIn = hasData;
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            AppColors.deepTeal,
-            const Color(0xFF0E7A68),
-          ],
-        ),
+        color: scheme.primaryContainer.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.deepTeal.withValues(alpha: 0.22),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.today_rounded, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  checkedIn ? 'You checked in today' : 'How was your day?',
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w800),
+                ),
+              ),
+              if (loading)
+                const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            checkedIn
+                ? 'Nice work. You can still update your entries anytime.'
+                : 'A one-minute check-in keeps your patterns accurate.',
+            style: TextStyle(fontSize: 13.5, color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: PrimaryButton(
+              label: checkedIn ? 'Update check-in' : 'Complete check-in',
+              icon: Icons.edit_note_rounded,
+              onPressed: onCheckin,
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _NextActionCard extends StatelessWidget {
+  const _NextActionCard({required this.action});
+
+  final NextAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AppCard(
+      onTap: () {
+        // The coach tab owns this flow; surfaced from home for convenience.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(action.reason.isEmpty
+              ? action.heading
+              : action.reason)),
+        );
+      },
       child: Row(
         children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(Icons.explore_rounded, size: 20, color: scheme.primary),
+          ),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    const Icon(Icons.health_and_safety_outlined, color: Colors.white, size: 20),
-                    const SizedBox(width: 8),
-                    Text(
-                      AppStrings.lifestyleScore,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+                Text(
+                  action.heading,
+                  style: const TextStyle(
+                      fontSize: 14.5, fontWeight: FontWeight.w700),
                 ),
-                const SizedBox(height: 10),
-                if (loading)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    child: SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    ),
-                  )
-                else if (showValue)
+                if (action.reason.isNotEmpty) ...[
+                  const SizedBox(height: 3),
                   Text(
-                    '$score',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 44,
-                      height: 1.05,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -1,
-                    ),
-                  )
-                else ...[
-                  Text(
-                    '\u2014',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 40,
-                      height: 1.05,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    AppStrings.noDataYet,
-                    style: TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ],
-                if (showValue) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      label!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                    action.reason,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        fontSize: 12.5, color: scheme.onSurfaceVariant),
                   ),
                 ],
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          if (showValue)
-            SizedBox(
-              height: 104,
-              width: 104,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  SizedBox(
-                    height: 104,
-                    width: 104,
-                    child: CircularProgressIndicator(
-                      value: (score! / 100).clamp(0.0, 1.0),
-                      strokeWidth: 10,
-                      strokeCap: StrokeCap.round,
-                      backgroundColor: Colors.white.withValues(alpha: 0.18),
-                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '${score!.round()}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Text(
-                        '${math.max(1, (score! / 25).ceil())} of 4',
-                        style: TextStyle(color: Colors.white60, fontSize: 10),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
         ],
       ),
     );
   }
 }
 
-/// Daily check-in call-to-action card.
-class _CheckinCtaCard extends StatelessWidget {
-  const _CheckinCtaCard({required this.onTap});
+class _WeeklySnapshotCard extends StatelessWidget {
+  const _WeeklySnapshotCard({required this.weekly, required this.loading});
 
-  final VoidCallback onTap;
+  final WeeklySummary? weekly;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.primaryContainer.withValues(alpha: 0.6),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: scheme.primary.withValues(alpha: 0.25), width: 1),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: scheme.primary,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.edit_calendar_rounded, color: Colors.white, size: 22),
+              Icon(Icons.calendar_view_week_rounded,
+                  size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('Last 7 days',
+                    style:
+                        TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppStrings.dailyCheckinCta,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      AppStrings.dailyCheckinCtaSubtitle,
-                      style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.chevron_right_rounded, color: scheme.primary),
             ],
           ),
-        ),
+          const SizedBox(height: 12),
+          if (loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: LinearProgressIndicator(minHeight: 2),
+            )
+          else if (weekly == null)
+            Text(
+              'Weekly summary is not available right now.',
+              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+            )
+          else ...[
+            Row(
+              children: [
+                _stat(scheme, '${weekly!.daysTracked}',
+                    'day${weekly!.daysTracked == 1 ? '' : 's'} tracked'),
+                _stat(scheme,
+                    '${(weekly!.completionRate * 100).round()}%', 'completion'),
+                _stat(scheme, '${weekly!.experimentsCompletedTotal}',
+                    'experiments done'),
+              ],
+            ),
+            if (weekly!.narrative.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                weekly!.narrative,
+                style: TextStyle(fontSize: 13, height: 1.45),
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _stat(ColorScheme scheme, String value, String label) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          Text(label,
+              style:
+                  TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant)),
+        ],
       ),
     );
   }

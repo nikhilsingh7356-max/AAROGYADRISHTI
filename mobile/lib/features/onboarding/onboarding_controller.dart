@@ -3,7 +3,6 @@ library;
 
 import 'package:flutter/foundation.dart';
 
-import '../../core/storage/storage_service.dart';
 import '../../models/app_enums.dart';
 
 class OnboardingController extends ChangeNotifier {
@@ -11,9 +10,9 @@ class OnboardingController extends ChangeNotifier {
   int get step => _step;
   bool get isLast => _step == 2;
 
-  // Goals (multi-select). At least one is required to continue.
-  final List<PrimaryGoal> _goals = [];
-  List<PrimaryGoal> get goals => List.unmodifiable(_goals);
+  // Goal (single-select, mirrors backend `primary_goal`). One is required.
+  PrimaryGoal? _goal;
+  PrimaryGoal? get goal => _goal;
 
   // Daily routine (all optional).
   double? _sleepHours;
@@ -30,7 +29,7 @@ class OnboardingController extends ChangeNotifier {
   final List<HealthDataTypeWrapper> _selectedHealth = [];
   List<HealthDataTypeWrapper> get selectedHealth => List.unmodifiable(_selectedHealth);
 
-  bool get goalsSelected => _goals.isNotEmpty;
+  bool get goalsSelected => _goal != null;
 
   bool get routineValid {
     return _activityLevel != null || _sleepHours != null || _waterIntake != null || _stressLevel != null;
@@ -38,20 +37,14 @@ class OnboardingController extends ChangeNotifier {
 
   bool get readyToFinish => goalsSelected;
 
-  /// Toggle a goal; keep all selections (multi-select).
+  /// Toggle a goal; only one can be selected (tapping again clears it).
   void toggleGoal(PrimaryGoal goal) {
-    if (_goals.contains(goal)) {
-      _goals.remove(goal);
-    } else {
-      _goals.add(goal);
-    }
+    _goal = _goal == goal ? null : goal;
     notifyListeners();
   }
 
-  void setGoals(List<PrimaryGoal> goals) {
-    _goals
-      ..clear()
-      ..addAll(goals);
+  void setGoal(PrimaryGoal? goal) {
+    _goal = goal;
     notifyListeners();
   }
 
@@ -88,35 +81,6 @@ class OnboardingController extends ChangeNotifier {
       notifyListeners();
     }
   }
-
-  /// Persist the multi-select goals locally so preferences survive app
-  /// restarts and are never silently overwritten later.
-  Future<void> persistGoals() async {
-    final storage = StorageService.instance;
-    final wires = _goals.map((g) => g.wire).toList();
-    await storage.setString(AppConstantsKeys.selectedGoalsKey, wires.isEmpty ? '' : wires.join(','));
-  }
-
-  Future<void> restoreSavedGoals() async {
-    final storage = StorageService.instance;
-    final raw = await storage.getString(AppConstantsKeys.selectedGoalsKey);
-    if (raw == null || raw.isEmpty) return;
-    final wires = raw.split(',').where((w) => w.isNotEmpty);
-    final restored = wires
-        .map(PrimaryGoal.fromWire)
-        .whereType<PrimaryGoal>()
-        .toList();
-    if (restored.isNotEmpty && _goals.isEmpty) {
-      setGoals(restored);
-    }
-  }
-}
-
-/// Internal key set for onboarding persistence.
-class AppConstantsKeys {
-  AppConstantsKeys._();
-
-  static const String selectedGoalsKey = 'app.selected_goals';
 }
 
 /// Value-object wrapper (data type + permission granted flag) so the UI can

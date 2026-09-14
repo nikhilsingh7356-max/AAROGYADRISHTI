@@ -19,10 +19,14 @@ import 'repositories/profile_repository.dart';
 /// All repositories share ONE `ApiClient` so a session token set after login
 /// is automatically available to every repository.
 class AppServices {
-  AppServices._()
-      : api = ApiClient(baseUrl: AppConstants.apiBaseUrl) {
+  AppServices._() : api = ApiClient(baseUrl: AppConstants.apiBaseUrl) {
     authRepository = AuthRepository(api);
     profileRepository = ProfileRepository(api);
+    // Persist refreshed tokens so a restored session never runs on a stale
+    // refresh token after the access token expires.
+    api.onTokensRefreshed = (access, refresh) {
+      StorageService.instance.saveTokens(access: access, refresh: refresh);
+    };
   }
 
   final ApiClient api;

@@ -5,12 +5,15 @@
 /// - authenticated & onboarded -> AppScaffold
 ///
 /// Onboarding state is fetched from the server profile (authoritative) and
-/// mirrored to local cache for instant cold-start decisions.
+/// mirrored to a per-user local cache used only as an offline fallback. The
+/// gate listens to auth transitions so it re-resolves after a login lands
+/// back on this route (and clears its view state on logout).
 library;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/constants/app_constants.dart';
 import '../core/constants/app_strings.dart';
 import '../core/network/api_exception.dart';
 import '../core/storage/storage_service.dart';
@@ -31,11 +34,45 @@ class _RootGateState extends State<RootGate> {
   bool _checking = false;
   bool _onboarded = false;
   String? _error;
+  AuthProvider? _watchedAuth;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _resolve());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _attachListener());
+  }
+
+  void _attachListener() {
+    if (!mounted) return;
+    final auth = context.read<AuthProvider>();
+    if (identical(_watchedAuth, auth)) return;
+    _watchedAuth?.removeListener(_onAuthChanged);
+    _watchedAuth = auth;
+    auth.addListener(_onAuthChanged);
+    if (auth.isAuthenticated) {
+      _resolve();
+    }
+  }
+
+  void _onAuthChanged() {
+    final auth = _watchedAuth;
+    if (auth == null) return;
+    if (auth.isAuthenticated) {
+      _resolve();
+    } else {
+      // Reset the view state on sign-out so it never leaks into the next
+      // session on this device.
+      setState(() {
+        _onboarded = false;
+        _error = null;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _watchedAuth?.removeListener(_onAuthChanged);
+    super.dispose();
   }
 
   Future<void> _resolve() async {
@@ -48,26 +85,30 @@ class _RootGateState extends State<RootGate> {
     });
 
     try {
-      final cached = await StorageService.instance.getBool('onboarding_completed');
-      if (cached == true) {
-        setState(() => _onboarded = true);
-      } else {
-        final profile = await AppServices.instance.profileRepository.get();
-        _onboarded = profile.isOnboarded;
-        await StorageService.instance.setBool('onboarding_completed', _onboarded);
-      }
+      final profile = await AppServices.instance.profileRepository.get();
+      if (!mounted) return;
+      setState(() => _onboarded = profile.isOnboarded);
+      await StorageService.instance.setBool(_cacheKey(auth.user?.id), profile.isOnboarded);
     } catch (e) {
-      // Offline / API unavailable: fall back to cache, default to onboarding.
+      if (!mounted) return;
       if (e is NetworkException || e is ServerException) {
-        final cached = await StorageService.instance.getBool('onboarding_completed');
-        setState(() => _onboarded = cached ?? false);
+        // Offline / API unavailable: fall back to this user's cache only.
+        final cached = await StorageService.instance.getBool(_cacheKey(auth.user?.id));
+        if (mounted) setState(() => _onboarded = cached ?? false);
+      } else if (e is UnauthorizedException) {
+        // The session can no longer be authenticated - route to sign-in.
+        await auth.logout();
       } else {
-        _error = AppStrings.somethingWentWrong;
+        setState(() => _error = AppStrings.somethingWentWrong);
       }
     } finally {
       if (mounted) setState(() => _checking = false);
     }
   }
+
+  String _cacheKey(int? userId) => userId == null
+      ? AppConstants.keyOnboardingCompleted
+      : '${AppConstants.keyOnboardingCompleted}_$userId';
 
   @override
   Widget build(BuildContext context) {

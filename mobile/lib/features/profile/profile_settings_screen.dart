@@ -9,13 +9,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_strings.dart';
-import '../../core/storage/storage_service.dart';
 import '../../models/app_enums.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/primary_button.dart';
+import '../../app.dart';
 import '../auth/welcome_screen.dart';
-import '../onboarding/onboarding_controller.dart';
 import 'goals_edit_screen.dart';
 
 class ProfileSettingsScreen extends StatefulWidget {
@@ -37,14 +36,14 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
 
   Future<void> _loadGoals() async {
     try {
-      final raw = await StorageService.instance.getString(AppConstantsKeys.selectedGoalsKey);
-      final loaded = <PrimaryGoal>[];
-      if (raw != null && raw.isNotEmpty) {
-        loaded.addAll(
-          raw.split(',').map((w) => PrimaryGoal.fromWire(w)).whereType<PrimaryGoal>(),
-        );
+      final profile = await AppServices.instance.profileRepository.get();
+      final goal = PrimaryGoal.fromWire(profile.primaryGoalWire);
+      if (mounted) {
+        setState(() {
+          _goals = [if (goal != null) goal];
+          _loadingGoals = false;
+        });
       }
-      if (mounted) setState(() { _goals = loaded; _loadingGoals = false; });
     } catch (_) {
       if (mounted) setState(() => _loadingGoals = false);
     }

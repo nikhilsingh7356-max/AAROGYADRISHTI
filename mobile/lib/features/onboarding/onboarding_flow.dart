@@ -1,19 +1,17 @@
 /// Root onboarding flow (3 pages, never shows the navigation bar).
 ///
-/// Steps: goals (multi-select) -> daily routine (optional) -> health connect.
-/// On finish the profile is posted with `onboarding_completed = true`, the
-/// multi-select goals are persisted locally, and the local onboarding flag is
-/// set so subsequent cold starts skip onboarding.
+/// Steps: goal (single-select) -> daily routine (optional) -> health connect.
+/// On finish the profile is posted with `onboarding_completed = true`.
+/// Completion is signalled to the host via `onComplete`; no navigation is
+/// performed here (the root gate swaps the tree once the flag flips).
 library;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_strings.dart';
-import '../../core/storage/storage_service.dart';
 import '../../widgets/primary_button.dart';
 import '../../app.dart';
-import '../root_gate.dart';
 import 'goal_screen.dart';
 import 'health_permission_screen.dart';
 import 'onboarding_controller.dart';
@@ -52,20 +50,13 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
   Future<void> _finish() async {
     if (!_ctrl.goalsSelected) return;
     try {
-      await _ctrl.persistGoals();
       final profileRepo = AppServices.instance.profileRepository;
       await profileRepo.update(
-        primaryGoalWire: _ctrl.goals.first.wire,
+        primaryGoalWire: _ctrl.goal!.wire,
         activityLevelWire: _ctrl.activityLevel?.wire,
         onboardingCompleted: true,
       );
-      await StorageService.instance.setBool('onboarding_completed', true);
       widget.onComplete();
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const RootGate()),
-        (_) => false,
-      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

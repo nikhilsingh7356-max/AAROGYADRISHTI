@@ -54,6 +54,12 @@ class AuthRepository {
     return _apply(_parseSession(data));
   }
 
+  /// Fetch the currently authenticated user (used to restore a session).
+  Future<User> currentUser() async {
+    final data = await _api.get('${AppConstants.apiV1Prefix}/auth/status');
+    return User.fromJson((data as Map<String, dynamic>)['user'] as Map<String, dynamic>);
+  }
+
   /// Restore a previously persisted session (tokens only; user is re-fetched).
   void restoreTokens({required String access, required String refresh}) {
     _api.setTokens(access: access, refresh: refresh);

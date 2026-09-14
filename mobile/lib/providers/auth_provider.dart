@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 
+import '../core/constants/app_constants.dart';
 import '../core/network/api_exception.dart';
 import '../core/storage/storage_service.dart';
 import '../models/user.dart';
@@ -49,6 +50,27 @@ class AuthProvider extends ChangeNotifier {
       _status = AuthStatus.unauthenticated;
     }
     notifyListeners();
+    if (_status == AuthStatus.authenticated && _user == null) {
+      await _refreshUser();
+    }
+  }
+
+  /// Re-fetch the signed-in user for a restored session (tokens alone are not
+  /// enough - `/auth/status` is the source of truth for `user`).
+  Future<void> _refreshUser() async {
+    try {
+      _user = await _repository.currentUser();
+      notifyListeners();
+    } on UnauthorizedException {
+      // Stored tokens are no longer valid: clear the local session.
+      await _storage.clearTokens();
+      _repository.clearSession();
+      _user = null;
+      _status = AuthStatus.unauthenticated;
+      notifyListeners();
+    } catch (_) {
+      // Offline / transient: keep the session; the user is re-fetched later.
+    }
   }
 
   Future<Null> _applySession(AuthSession session) async {
@@ -149,12 +171,18 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<Null> logout() async {
+    final userId = _user?.id;
     try {
       await _repository.logout();
     } catch (_) {
       // Server logout is best-effort; local logout always succeeds.
     }
     await _storage.clearTokens();
+    if (userId != null) {
+      // Clear this user's onboarding cache so it can't leak across accounts
+      // on a shared device.
+      await _storage.remove('${AppConstants.keyOnboardingCompleted}_$userId');
+    }
     await firebase_auth.FirebaseAuth.instance.signOut();
     await _googleSignIn.signOut();
     _repository.clearSession();

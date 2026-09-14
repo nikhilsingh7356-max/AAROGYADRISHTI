@@ -1,4 +1,4 @@
-/// AI preventive lifestyle coach - conversation list (Phase 6).
+/// Lifestyle coach - conversation list (Phase 6).
 ///
 /// The coach answers only from aggregate lifestyle data; it never diagnoses
 /// or prescribes. Replies are sanitised by the backend safety guard.
@@ -12,13 +12,12 @@ import '../../core/network/api_exception.dart';
 import '../../core/utils/date_utils.dart';
 import '../../models/coach.dart';
 import '../../repositories/coach_repository.dart';
+import '../../widgets/app_card.dart';
+import '../../widgets/state_views.dart';
 import 'chat_screen.dart';
 
 class CoachScreen extends StatefulWidget {
-  const CoachScreen({super.key, this.onNavigateTab});
-
-  /// Switches the root tab (e.g. Experiments -> tab 3, Insights -> tab 1).
-  final ValueChanged<int>? onNavigateTab;
+  const CoachScreen({super.key});
 
   @override
   State<CoachScreen> createState() => _CoachScreenState();
@@ -31,6 +30,7 @@ class _CoachScreenState extends State<CoachScreen> {
   bool _loading = true;
   bool _creating = false;
   String? _error;
+  bool _offline = false;
 
   @override
   void initState() {
@@ -42,10 +42,18 @@ class _CoachScreenState extends State<CoachScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _offline = false;
     });
     try {
       final data = await _repo.conversations();
       if (mounted) setState(() => _conversations = data.conversations);
+    } on NetworkException {
+      if (mounted) {
+        setState(() {
+          _error = AppStrings.noInternet;
+          _offline = true;
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
@@ -63,7 +71,10 @@ class _CoachScreenState extends State<CoachScreen> {
       await _openChat(convo.id);
       await _load();
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _creating = false);
     }
@@ -77,6 +88,7 @@ class _CoachScreenState extends State<CoachScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Lifestyle Coach'),
@@ -87,46 +99,48 @@ class _CoachScreenState extends State<CoachScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _creating ? null : _newChat,
         icon: _creating
-            ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+            ? const SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
             : const Icon(Icons.chat_bubble_outline),
         label: const Text('New chat'),
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off, size: 40),
-                      const SizedBox(height: 12),
-                      Text(_error!),
-                      const SizedBox(height: 12),
-                      FilledButton(onPressed: _load, child: const Text('Retry')),
-                    ],
-                  ),
-                )
+              ? ErrorState(message: _error!, onRetry: _load, offline: _offline)
               : _conversations.isEmpty
                   ? _EmptyCoach(
-                      onTryExperiment: widget.onNavigateTab == null ? null : () => widget.onNavigateTab!(3),
-                      onViewInsights: widget.onNavigateTab == null ? null : () => widget.onNavigateTab!(1),
                       onNewChat: _newChat,
                       creating: _creating,
                     )
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 88),
                         itemCount: _conversations.length,
                         itemBuilder: (context, index) {
                           final c = _conversations[index];
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            child: ListTile(
-                              leading: const Icon(Icons.chat_outlined),
-                              title: Text(c.title),
-                              subtitle: Text(AppDateUtils.shortDay(c.createdAt.toLocal())),
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: AppCard(
                               onTap: () => _openChat(c.id),
+                              child: ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                dense: true,
+                                leading: Icon(Icons.chat_outlined,
+                                    color: scheme.primary),
+                                title: Text(
+                                  c.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text(
+                                    AppDateUtils.shortDay(c.createdAt.toLocal())),
+                                trailing: Icon(Icons.chevron_right_rounded,
+                                    color: scheme.onSurfaceVariant),
+                              ),
                             ),
                           );
                         },
@@ -137,15 +151,8 @@ class _CoachScreenState extends State<CoachScreen> {
 }
 
 class _EmptyCoach extends StatelessWidget {
-  const _EmptyCoach({
-    required this.onTryExperiment,
-    required this.onViewInsights,
-    required this.onNewChat,
-    required this.creating,
-  });
+  const _EmptyCoach({required this.onNewChat, required this.creating});
 
-  final VoidCallback? onTryExperiment;
-  final VoidCallback? onViewInsights;
   final VoidCallback onNewChat;
   final bool creating;
 
@@ -164,43 +171,26 @@ class _EmptyCoach extends StatelessWidget {
                 color: scheme.primaryContainer,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.psychology_alt_outlined, size: 36, color: scheme.primary),
+              child: Icon(Icons.psychology_alt_outlined,
+                  size: 36, color: scheme.primary),
             ),
             const SizedBox(height: 16),
-            Text(
+            const Text(
               'Your coach is ready when you are',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             Text(
               'Chat about your lifestyle patterns to see honest, data-backed observations.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, height: 1.45, color: scheme.onSurfaceVariant),
+              style: TextStyle(
+                  fontSize: 14, height: 1.45, color: scheme.onSurfaceVariant),
             ),
             const SizedBox(height: 20),
-            if (onTryExperiment != null) ...[
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onTryExperiment,
-                  icon: const Icon(Icons.science_outlined),
-                  label: Text(AppStrings.tryExperiment),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onViewInsights,
-                  icon: const Icon(Icons.insights_outlined),
-                  label: Text(AppStrings.viewInsights),
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(14),
@@ -224,9 +214,10 @@ class _EmptyCoach extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            Text(
-              'Tap New chat to get started',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
+            FilledButton.icon(
+              onPressed: creating ? null : onNewChat,
+              icon: const Icon(Icons.chat_bubble_outline),
+              label: const Text('Start your first chat'),
             ),
           ],
         ),

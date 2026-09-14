@@ -43,8 +43,7 @@ class AppConstants {
   /// Local cache version - bump to force a client cache reset.
   static const int cacheVersion = 1;
 
-  // Local preference keys.
-  static const String keySelectedGoals = 'selected_goals';
+  // Local preference keys (plain prefs; never sensitive data).
   static const String keyOnboardingCompleted = 'onboarding_completed';
   static const String keyRoutineSleep = 'routine_sleep_hours';
   static const String keyRoutineActivity = 'routine_activity_level';

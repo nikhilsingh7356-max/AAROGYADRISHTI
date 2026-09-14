@@ -1,4 +1,4 @@
-/// Onboarding goal selection screen (multi-select).
+/// Onboarding goal selection screen (single-select).
 library;
 
 import 'package:flutter/material.dart';
@@ -35,14 +35,14 @@ class GoalScreen extends StatelessWidget {
           const SizedBox(height: 16),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 150),
-            child: controller.goals.isEmpty
+            child: controller.goal == null
                 ? Text(
-                    'Select at least one area to continue.',
+                    AppStrings.goalSelectionHint,
                     key: const ValueKey('hint'),
                     style: TextStyle(fontSize: 13, color: scheme.error),
                   )
                 : Text(
-                    '${controller.goals.length} selected',
+                    'Focus on ${controller.goal!.label}',
                     key: const ValueKey('count'),
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.primary),
                   ),
@@ -57,7 +57,7 @@ class GoalScreen extends StatelessWidget {
                 return SelectionCard(
                   label: goal.label,
                   icon: goal.icon,
-                  selected: controller.goals.contains(goal),
+                  selected: controller.goal == goal,
                   onTap: () => controller.toggleGoal(goal),
                 );
               },

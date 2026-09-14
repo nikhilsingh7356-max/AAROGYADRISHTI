@@ -65,6 +65,17 @@ def test_invalid_goal_rejected(client, auth_headers):
     assert resp.status_code == 422
 
 
+def test_hydration_goal_accepted(client, auth_headers):
+    headers = auth_headers("hydration-goal@example.com")
+    resp = client.post(
+        "/api/v1/profile",
+        json={"primary_goal": "hydration", "age_group": "25_34"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["primary_goal"] == "hydration"
+
+
 def test_invalid_activity_level_rejected(client, auth_headers):
     headers = auth_headers("invalid-activity@example.com")
     resp = client.post(

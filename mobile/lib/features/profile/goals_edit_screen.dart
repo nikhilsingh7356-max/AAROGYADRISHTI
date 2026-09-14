@@ -1,8 +1,8 @@
-/// Goals editing screen - reusable multi-select picker shared with onboarding.
+/// Goal editing screen - single-select picker shared with onboarding.
 ///
-/// Loads previously saved goals from StorageService and persists the updated
-/// selection both locally (all goals) and on the backend (first goal as
-/// primary).
+/// The backend stores exactly one primary goal (`user_profiles.primary_goal`),
+/// so the screen loads the server profile and saves the selection there
+/// (no local preferences involved).
 library;
 
 import 'package:flutter/material.dart';
@@ -14,8 +14,6 @@ import '../../repositories/profile_repository.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/selection_card.dart';
 import '../../app.dart';
-import '../../core/storage/storage_service.dart';
-import '../onboarding/onboarding_controller.dart';
 
 class GoalsEditScreen extends StatefulWidget {
   const GoalsEditScreen({super.key});
@@ -25,7 +23,7 @@ class GoalsEditScreen extends StatefulWidget {
 }
 
 class _GoalsEditScreenState extends State<GoalsEditScreen> {
-  late final Set<PrimaryGoal> _selected;
+  PrimaryGoal? _selected;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -33,18 +31,13 @@ class _GoalsEditScreenState extends State<GoalsEditScreen> {
   @override
   void initState() {
     super.initState();
-    _selected = {};
     _loadSaved();
   }
 
   Future<void> _loadSaved() async {
     try {
-      final raw = await StorageService.instance.getString(AppConstantsKeys.selectedGoalsKey);
-      if (raw != null && raw.isNotEmpty) {
-        _selected.addAll(
-          raw.split(',').map((w) => PrimaryGoal.fromWire(w)).whereType<PrimaryGoal>(),
-        );
-      }
+      final profile = await ProfileRepository(AppServices.instance.api).get();
+      if (mounted) setState(() => _selected = PrimaryGoal.fromWire(profile.primaryGoalWire));
     } catch (_) {
       // Fresh selection otherwise.
     } finally {
@@ -54,35 +47,22 @@ class _GoalsEditScreenState extends State<GoalsEditScreen> {
 
   void _toggle(PrimaryGoal goal) {
     setState(() {
-      if (_selected.contains(goal)) {
-        _selected.remove(goal);
-      } else {
-        _selected.add(goal);
-      }
+      _selected = identical(_selected, goal) ? null : goal;
     });
   }
 
   Future<void> _save() async {
     if (_saving) return;
+    final goal = _selected;
+    if (goal == null) return;
     setState(() {
       _saving = true;
       _error = null;
     });
 
     try {
-      // Persist multi-select goals locally.
-      final storage = StorageService.instance;
-      final wires = _selected.map((g) => g.wire).toList();
-      await storage.setString(
-        AppConstantsKeys.selectedGoalsKey,
-        wires.isEmpty ? '' : wires.join(','),
-      );
-
-      // Update backend primary goal (only the first is stored server-side).
-      if (_selected.isNotEmpty) {
-        final repo = ProfileRepository(AppServices.instance.api);
-        await repo.update(primaryGoalWire: _selected.first.wire);
-      }
+      final repo = ProfileRepository(AppServices.instance.api);
+      await repo.update(primaryGoalWire: goal.wire);
 
       if (mounted) Navigator.of(context).pop(true);
     } on NetworkException {
@@ -129,7 +109,7 @@ class _GoalsEditScreenState extends State<GoalsEditScreen> {
                           SelectionCard(
                             icon: goal.icon,
                             label: goal.label,
-                            selected: _selected.contains(goal),
+                            selected: identical(_selected, goal),
                             onTap: () => _toggle(goal),
                           ),
                           const SizedBox(height: 10),
@@ -159,10 +139,10 @@ class _GoalsEditScreenState extends State<GoalsEditScreen> {
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                     child: PrimaryButton(
-                      label: 'Save goals',
+                      label: 'Save goal',
                       icon: Icons.check_rounded,
                       loading: _saving,
-                      onPressed: _selected.isNotEmpty ? _save : null,
+                      onPressed: _selected != null ? _save : null,
                     ),
                   ),
                 ),

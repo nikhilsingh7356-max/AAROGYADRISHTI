@@ -29,31 +29,30 @@ void main() {
     });
   });
 
-  group('goals (multi-select)', () {
-    test('toggleGoal adds and removes while keeping other selections', () {
+  group('goals (single-select)', () {
+    test('toggleGoal selects one goal; tapping again clears it', () {
       final c = OnboardingController();
       expect(c.goalsSelected, isFalse);
 
       c.toggleGoal(PrimaryGoal.betterSleep);
-      c.toggleGoal(PrimaryGoal.hydration);
-      expect(c.goals.length, 2);
+      expect(c.goal, PrimaryGoal.betterSleep);
       expect(c.goalsSelected, isTrue);
 
-      // Deselect one goal; the other must remain selected.
-      c.toggleGoal(PrimaryGoal.betterSleep);
-      expect(c.goals, [PrimaryGoal.hydration]);
+      // Selecting a different goal replaces the previous one.
+      c.toggleGoal(PrimaryGoal.hydration);
+      expect(c.goal, PrimaryGoal.hydration);
       expect(c.goalsSelected, isTrue);
 
-      // Deselect the last goal -> nothing selected, continue disabled.
+      // Deselect the goal -> nothing selected, continue disabled.
       c.toggleGoal(PrimaryGoal.hydration);
-      expect(c.goals, isEmpty);
+      expect(c.goal, isNull);
       expect(c.goalsSelected, isFalse);
     });
 
-    test('setGoals replaces the full selection and can be empty', () {
-      final c = OnboardingController()..setGoals([PrimaryGoal.betterSleep, PrimaryGoal.moreEnergy]);
-      expect(c.goals.length, 2);
-      c.setGoals([]);
+    test('setGoal replaces the selection and can clear it', () {
+      final c = OnboardingController()..setGoal(PrimaryGoal.betterSleep);
+      expect(c.goal, PrimaryGoal.betterSleep);
+      c.setGoal(null);
       expect(c.goalsSelected, isFalse);
     });
   });

@@ -1,7 +1,7 @@
 /// Thin HTTP client wrapping `package:http`.
 ///
 /// - Attaches `Authorization: Bearer <token>` when a token is available.
-/// - Handles token refresh on 401 (best effort; Phase 1 simply logs out).
+/// - Handles token refresh on 401 and persists the refreshed token pair.
 /// - Parses the backend error envelope into typed exceptions.
 /// - Never exposes raw backend stack traces.
 library;
@@ -17,12 +17,23 @@ import 'api_exception.dart';
 typedef JsonMap = Map<String, dynamic>;
 
 class ApiClient {
-  ApiClient({required String baseUrl, http.Client? httpClient})
+  ApiClient({
+    required String baseUrl,
+    http.Client? httpClient,
+    this.onTokensRefreshed,
+    this.onSessionExpired,
+  })
       : baseUrl = baseUrl.replaceFirst(RegExp(r'/+$'), ''),
         _http = httpClient ?? http.Client();
 
   final String baseUrl;
   final http.Client _http;
+
+  /// Called after a successful token refresh so the new pair can be persisted.
+  final void Function(String accessToken, String refreshToken)? onTokensRefreshed;
+
+  /// Called when refresh fails on a 401 (session truly expired/invalidated).
+  final void Function()? onSessionExpired;
 
   String? _accessToken;
   String? _refreshToken;
@@ -85,14 +96,17 @@ class ApiClient {
     }
 
     if (response.statusCode == 401 && _refreshToken != null) {
-      // Best effort refresh; if it fails the caller re-auths.
       final refreshed = await _tryRefresh();
       if (refreshed) {
         try {
           response = await request().timeout(_requestTimeout);
+        } on TimeoutException {
+          throw const ApiException(message: 'The request timed out. Please try again.');
         } catch (_) {
           throw NetworkException('No internet connection. Please try again.');
         }
+      } else {
+        onSessionExpired?.call();
       }
     }
 
@@ -122,7 +136,11 @@ class ApiClient {
           .timeout(_requestTimeout);
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body) as JsonMap;
-        setTokens(access: body['access_token'] as String?, refresh: body['refresh_token'] as String?);
+        final access = body['access_token'] as String?;
+        final refresh = body['refresh_token'] as String?;
+        if (access == null || refresh == null) return false;
+        setTokens(access: access, refresh: refresh);
+        onTokensRefreshed?.call(access, refresh);
         return true;
       }
       return false;

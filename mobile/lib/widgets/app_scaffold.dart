@@ -1,9 +1,12 @@
 /// Root scaffold with the 5-tab bottom navigation
-/// (Home / Insights / Coach / Experiments / Profile).
+/// (Home / Check-in / Insights / Experiments / Coach).
+///
+/// Profile lives outside the bar and is pushed from the Home header.
 library;
 
 import 'package:flutter/material.dart';
 
+import '../features/checkin/checkin_screen.dart';
 import '../features/coach/coach_screen.dart';
 import '../features/dashboard/home_screen.dart';
 import '../features/experiments/experiments_screen.dart';
@@ -21,12 +24,20 @@ class AppScaffold extends StatefulWidget {
 class _AppScaffoldState extends State<AppScaffold> {
   int _index = 0;
 
+  void _openTab(int i) => setState(() => _index = i);
+
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ProfileSettingsScreen()),
+    );
+  }
+
   late final List<Widget> _screens = [
-    HomeScreen(onOpenProfile: () => setState(() => _index = 4)),
+    HomeScreen(onOpenProfile: _openProfile),
+    const CheckinTab(),
     const InsightsScreen(),
-    CoachScreen(onNavigateTab: (i) => setState(() => _index = i)),
     const ExperimentsScreen(),
-    const ProfileSettingsScreen(),
+    const CoachScreen(),
   ];
 
   @override
@@ -35,9 +46,7 @@ class _AppScaffoldState extends State<AppScaffold> {
       body: IndexedStack(index: _index, children: _screens),
       bottomNavigationBar: AppBottomBar(
         currentIndex: _index,
-        onTap: (i) {
-          setState(() => _index = i);
-        },
+        onTap: _openTab,
       ),
     );
   }

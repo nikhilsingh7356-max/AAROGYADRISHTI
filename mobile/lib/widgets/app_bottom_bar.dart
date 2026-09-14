@@ -1,8 +1,7 @@
 /// Custom bottom navigation bar for AarogyaDrishti.
 ///
-/// Wrapped in `SafeArea` (bottom) so the bar never overlaps Android's
-/// system navigation gesture area. Selected tab uses the teal accent with a
-/// filled/strong icon.
+/// New IA: Home / Check-in / Insights / Experiments / Coach.
+/// Profile is reached from the Home header (per the information architecture).
 library;
 
 import 'package:flutter/material.dart';
@@ -23,10 +22,10 @@ class AppTab {
 
 const List<AppTab> kAppTabs = [
   AppTab(index: 0, label: 'Home', icon: Icons.home_outlined, selectedIcon: Icons.home_rounded),
-  AppTab(index: 1, label: 'Insights', icon: Icons.insights_outlined, selectedIcon: Icons.insights_rounded),
-  AppTab(index: 2, label: 'Coach', icon: Icons.chat_bubble_outline_rounded, selectedIcon: Icons.chat_bubble_rounded),
+  AppTab(index: 1, label: 'Check-in', icon: Icons.edit_note_outlined, selectedIcon: Icons.edit_note_rounded),
+  AppTab(index: 2, label: 'Insights', icon: Icons.insights_outlined, selectedIcon: Icons.insights_rounded),
   AppTab(index: 3, label: 'Experiments', icon: Icons.science_outlined, selectedIcon: Icons.science_rounded),
-  AppTab(index: 4, label: 'Profile', icon: Icons.person_outline_rounded, selectedIcon: Icons.person_rounded),
+  AppTab(index: 4, label: 'Coach', icon: Icons.chat_bubble_outline_rounded, selectedIcon: Icons.chat_bubble_rounded),
 ];
 
 /// A single destination inside [AppBottomBar].

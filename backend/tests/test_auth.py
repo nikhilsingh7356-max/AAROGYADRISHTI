@@ -119,6 +119,20 @@ def test_protected_route_rejects_garbage_token(client):
     assert resp.status_code == 401
 
 
+def test_auth_status_returns_user(client, auth_headers):
+    headers = auth_headers("status@example.com")
+    resp = client.get("/api/v1/auth/status", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["authenticated"] is True
+    assert body["user"]["email"] == "status@example.com"
+
+
+def test_auth_status_requires_token(client):
+    resp = client.get("/api/v1/auth/status")
+    assert resp.status_code == 401
+
+
 def test_logout_invalidates_token(client, auth_headers):
     headers = auth_headers("logout@example.com")
     resp = client.post("/api/v1/auth/logout", headers=headers)

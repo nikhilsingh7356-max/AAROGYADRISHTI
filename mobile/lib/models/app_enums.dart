@@ -66,6 +66,8 @@ enum MealQuality {
       MealQuality.values.where((e) => e.wire == s).firstOrNull;
 }
 
+/// Onboarding routine buckets. The backend profile has no water field, so
+/// these stay local-only (never sent to the profile API).
 enum WaterIntake {
   low('low', '<1L'),
   medium('medium', '1\u20132L'),

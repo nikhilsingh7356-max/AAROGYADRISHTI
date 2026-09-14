@@ -7,6 +7,7 @@ from fastapi import APIRouter
 from app.api.deps import CurrentUser, DbSession
 from app.core.errors import AuthenticationError
 from app.schemas.auth import (
+    AuthStatusResponse,
     ForgotPasswordRequest,
     FirebaseAuthRequest,
     LoginRequest,
@@ -47,6 +48,15 @@ def login_user(payload: LoginRequest, db: DbSession):
 def logout_user(db: DbSession, user: CurrentUser):
     logout(db, user)
     return Message(message="Signed out successfully.")
+
+
+@router.get("/status", response_model=AuthStatusResponse)
+def auth_status(user: CurrentUser):
+    """Return the currently authenticated user (used to restore a session)."""
+    return AuthStatusResponse(
+        authenticated=True,
+        user=UserResponse.model_validate(user),
+    )
 
 
 @router.post("/refresh", response_model=TokenResponse)

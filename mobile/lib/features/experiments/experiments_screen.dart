@@ -1,19 +1,20 @@
-/// Experiments tab (Phase 3): recommendation, active experiment and history.
+/// Experiments - recommendation, active experiment and history (Phase 3/4).
 ///
-/// Recommendation comes from the deterministic analytics engine - it is a
-/// correlation observation to test, never a medical recommendation.
+/// Backend status vocabulary is authoritative: experiments are "active",
+/// "completed" or "cancelled" (never "running"). All evaluation content is
+/// backend-computed and presented verbatim - Flutter adds no math.
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
-import '../../core/constants/app_strings.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/utils/date_utils.dart';
 import '../../models/experiment.dart';
 import '../../repositories/experiment_repository.dart';
-import '../learning/learning_screen.dart';
-import 'experiment_detail_screen.dart';
+import '../../widgets/app_card.dart';
+import '../../widgets/badges.dart';
+import '../../widgets/state_views.dart';
 
 class ExperimentsScreen extends StatefulWidget {
   const ExperimentsScreen({super.key});
@@ -31,6 +32,7 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
   bool _loading = true;
   bool _starting = false;
   String? _error;
+  bool _offline = false;
 
   @override
   void initState() {
@@ -42,6 +44,7 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _offline = false;
     });
     try {
       final results = await Future.wait([
@@ -55,10 +58,17 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
         _active = results[1] as ActiveExperimentResponse;
         _history = (results[2] as List<ExperimentHistoryItem>);
       });
+    } on NetworkException {
+      if (mounted) {
+        setState(() {
+          _error = 'No internet connection. Please try again.';
+          _offline = true;
+        });
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = AppStrings.somethingWentWrong);
+      if (mounted) setState(() => _error = 'Something went wrong. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -70,12 +80,16 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
       await _repo.start(rec.experimentType);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Experiment started. Keep logging daily!')),
+          const SnackBar(
+              content: Text('Experiment started. Keep logging daily!')),
         );
       }
       await _load();
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _starting = false);
     }
@@ -83,7 +97,8 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
 
   Future<void> _openDetail(int experimentId) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ExperimentDetailScreen(experimentId: experimentId)),
+      MaterialPageRoute(
+          builder: (_) => ExperimentDetailScreen(experimentId: experimentId)),
     );
     if (mounted) _load();
   }
@@ -95,35 +110,11 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
     final rec = _recommendation?.recommendation;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Experiments'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.psychology_outlined),
-            tooltip: 'What works for me',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const LearningScreen()),
-              );
-            },
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Experiments')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off, size: 40),
-                      const SizedBox(height: 12),
-                      Text(_error!),
-                      const SizedBox(height: 12),
-                      FilledButton(onPressed: _load, child: const Text('Retry')),
-                    ],
-                  ),
-                )
+              ? ErrorState(message: _error!, onRetry: _load, offline: _offline)
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
@@ -132,13 +123,16 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
                       if (active != null) ...[
                         _ActiveCard(
                           experiment: active,
-                          progressPercent: 0,
                           onTap: () => _openDetail(active.id),
                         ),
                         const SizedBox(height: 16),
                       ],
-                      if (_recommendation != null && rec != null) ...[
-                        Text('Suggested next test', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
+                      if (rec != null) ...[
+                        Text('Suggested next test',
+                            style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: scheme.onSurfaceVariant)),
                         const SizedBox(height: 8),
                         _RecommendationCard(
                           recommendation: rec,
@@ -147,31 +141,32 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
                         ),
                         const SizedBox(height: 16),
                       ],
-                      if (rec == null && _recommendation != null && active == null) ...[
-                        _EmptyRecommendation(reason: _recommendation!.reason),
+                      if (rec == null && active == null) ...[
+                        _EmptyRecommendation(reason: _recommendation?.reason),
                         const SizedBox(height: 16),
                       ],
-                      Text(
-                        'Past experiments',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant),
-                      ),
+                      Text('Past experiments',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: scheme.onSurfaceVariant)),
                       const SizedBox(height: 8),
                       if (_history.isEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 24),
-                          child: Center(
-                            child: Text(
-                              'No experiments yet. When you have at least a few days of check-ins, you will get a suggestion to test a pattern.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: scheme.onSurfaceVariant),
-                            ),
+                          child: Text(
+                            'No experiments yet. When you have at least a few days of check-ins, you will get a suggestion to test a pattern.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: scheme.onSurfaceVariant),
                           ),
                         )
                       else
                         ..._history.map(
                           (item) => Padding(
                             padding: const EdgeInsets.only(bottom: 10),
-                            child: _HistoryTile(item: item, onTap: () => _openDetail(item.experiment.id)),
+                            child: _HistoryTile(
+                                item: item,
+                                onTap: () => _openDetail(item.experiment.id)),
                           ),
                         ),
                       const SizedBox(height: 24),
@@ -183,63 +178,63 @@ class _ExperimentsScreenState extends State<ExperimentsScreen> {
 }
 
 class _ActiveCard extends StatelessWidget {
-  const _ActiveCard({required this.experiment, required this.progressPercent, required this.onTap});
+  const _ActiveCard({required this.experiment, required this.onTap});
 
   final Experiment experiment;
-  final int progressPercent;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      color: scheme.primaryContainer,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return AppCard(
+      onTap: onTap,
+      color: scheme.primaryContainer.withValues(alpha: 0.55),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Icon(Icons.science_outlined, color: scheme.onPrimaryContainer),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(experiment.title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: scheme.onPrimaryContainer)),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(experiment.status, style: TextStyle(color: scheme.onPrimaryContainer)),
-                ],
+              Icon(Icons.science_outlined, color: scheme.onPrimaryContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(experiment.title,
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: scheme.onPrimaryContainer)),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Intervention: ${experiment.intervention}',
-                style: TextStyle(color: scheme.onPrimaryContainer),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${AppDateUtils.shortDay(experiment.startDate)} - ${AppDateUtils.shortDay(experiment.endDate)}',
-                style: TextStyle(color: scheme.onPrimaryContainer.withValues(alpha: 0.7)),
-              ),
-              const SizedBox(height: 12),
-              LinearProgressIndicator(value: progressPercent / 100),
-              const SizedBox(height: 6),
-              Text(
-                'Open to log today',
-                style: TextStyle(fontSize: 12, color: scheme.onPrimaryContainer.withValues(alpha: 0.7)),
+              StatusBadge(
+                label: experiment.status,
+                color: scheme.primary,
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 8),
+          Text('Intervention: ${experiment.intervention}',
+              style: TextStyle(color: scheme.onPrimaryContainer)),
+          const SizedBox(height: 4),
+          Text(
+            '${AppDateUtils.shortDay(experiment.startDate)} - ${AppDateUtils.shortDay(experiment.endDate)}',
+            style: TextStyle(
+                color: scheme.onPrimaryContainer.withValues(alpha: 0.7)),
+          ),
+          const SizedBox(height: 12),
+          Text('Open to log today',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onPrimaryContainer.withValues(alpha: 0.7))),
+        ],
       ),
     );
   }
 }
 
 class _RecommendationCard extends StatelessWidget {
-  const _RecommendationCard({required this.recommendation, required this.starting, required this.onStart});
+  const _RecommendationCard({
+    required this.recommendation,
+    required this.starting,
+    required this.onStart,
+  });
 
   final ExperimentRecommendation recommendation;
   final bool starting;
@@ -248,42 +243,48 @@ class _RecommendationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(recommendation.title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 6),
-            Text(recommendation.why, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
-            const SizedBox(height: 10),
-            _row(context, Icons.flag_outlined, 'Try: ${recommendation.intervention}'),
-            _row(
-              context,
-              Icons.calendar_month_outlined,
-              '${recommendation.durationDays} days, watch ${recommendation.metrics.join(', ')}',
-            ),
-            if (recommendation.learningContext.hasLearning)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'Known from your history: ${recommendation.learningContext.note ?? 'a similar pattern was observed before.'}',
-                  style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: scheme.onSurfaceVariant),
-                ),
-              ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: starting ? null : onStart,
-                child: starting
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('Start experiment'),
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(recommendation.title,
+              style:
+                  const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(recommendation.why,
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+          const SizedBox(height: 10),
+          _row(context, Icons.flag_outlined, 'Try: ${recommendation.intervention}'),
+          _row(
+            context,
+            Icons.calendar_month_outlined,
+            '${recommendation.durationDays} days, watch ${recommendation.metrics.join(', ')}',
+          ),
+          if (recommendation.learningContext.hasLearning)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Known from your history: ${recommendation.learningContext.note ?? 'a similar pattern was observed before.'}',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    color: scheme.onSurfaceVariant),
               ),
             ),
-          ],
-        ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: starting ? null : onStart,
+              child: starting
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Start experiment'),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -312,20 +313,18 @@ class _EmptyRecommendation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.insights_outlined, color: scheme.primary),
-            const SizedBox(height: 8),
-            Text(
-              reason ?? 'Not enough data yet to suggest an experiment. Keep logging your daily check-ins.',
-              style: TextStyle(color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ),
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.insights_outlined, color: scheme.primary),
+          const SizedBox(height: 8),
+          Text(
+            reason ??
+                'Not enough data yet to suggest an experiment. Keep logging your daily check-ins.',
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+        ],
       ),
     );
   }
@@ -341,65 +340,42 @@ class _HistoryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final exp = item.experiment;
-    final evidence = item.result?.evidenceLevel ?? 'NO_EVIDENCE';
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return AppCard(
+      onTap: onTap,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(exp.title, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: scheme.secondaryContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      exp.status,
-                      style: TextStyle(fontSize: 11, color: scheme.onSecondaryContainer),
-                    ),
-                  ),
-                ],
+              Expanded(
+                child: Text(exp.title,
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
               ),
-              const SizedBox(height: 6),
-              Text(
-                exp.intervention,
-                style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13),
+              StatusBadge(
+                label: exp.status,
+                color: exp.status == 'completed'
+                    ? scheme.primary
+                    : scheme.onSurfaceVariant,
               ),
-              const SizedBox(height: 4),
-              Text(
-                '${AppDateUtils.shortDay(exp.startDate)} - ${AppDateUtils.shortDay(exp.endDate)}',
-                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
-              ),
-              if (item.result != null) ...[
-                const SizedBox(height: 8),
-                _evidenceChip(scheme, evidence),
-              ],
             ],
           ),
-        ),
+          const SizedBox(height: 6),
+          Text(exp.intervention,
+              style:
+                  TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+          const SizedBox(height: 4),
+          Text(
+            '${AppDateUtils.shortDay(exp.startDate)} - ${AppDateUtils.shortDay(exp.endDate)}',
+            style: TextStyle(
+                fontSize: 12,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.7)),
+          ),
+          if (item.result != null) ...[
+            const SizedBox(height: 8),
+            EvidenceBadge(level: item.result!.evidenceLevel, compact: true),
+          ],
+        ],
       ),
-    );
-  }
-
-  Widget _evidenceChip(ColorScheme scheme, String level) {
-    return Row(
-      children: [
-        Icon(Icons.fact_check_outlined, size: 16, color: scheme.primary),
-        const SizedBox(width: 6),
-        Text(
-          'Evidence: ${level.replaceAll('_', ' ')}',
-          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: scheme.onSurfaceVariant),
-        ),
-      ],
     );
   }
 }

@@ -1,19 +1,22 @@
-/// Experiment detail screen (Phase 3 + Phase 4).
+/// Experiment detail - running experiments log daily progress; completed
+/// experiments show backend-computed results, evidence and the learning
+/// candidate decision card.
 ///
-/// - Running experiment: log today's target + optional metrics, view progress,
-///   complete or cancel.
-/// - Completed experiment: result/evidence view with the option to accept or
-///   reject the learning candidate that feeds the personal learning profile.
+/// Status handling is backend-authoritative ("active", "completed",
+/// "cancelled").
 library;
 
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
-import '../../core/constants/app_strings.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/utils/date_utils.dart';
 import '../../models/experiment.dart';
 import '../../repositories/experiment_repository.dart';
+import '../../widgets/app_card.dart';
+import '../../widgets/badges.dart';
+import '../../widgets/progress_ring.dart';
+import '../../widgets/state_views.dart';
 
 class ExperimentDetailScreen extends StatefulWidget {
   const ExperimentDetailScreen({super.key, required this.experimentId});
@@ -61,14 +64,13 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       final detail = await _repo.detail(widget.experimentId);
       ExperimentResult? result;
       LearningCandidate? candidate;
-      if (detail.experiment.status != 'running') {
+      if (detail.experiment.status != 'active') {
         final results = await Future.wait([
           _repo.result(widget.experimentId),
-          _repo.evidence(widget.experimentId),
           _repo.learningCandidateFor(widget.experimentId),
         ]);
         result = results[0] as ExperimentResult;
-        candidate = results[2] as LearningCandidate?;
+        candidate = results[1] as LearningCandidate?;
       }
       if (!mounted) return;
       setState(() {
@@ -79,7 +81,9 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (_) {
-      if (mounted) setState(() => _error = AppStrings.somethingWentWrong);
+      if (mounted) {
+        setState(() => _error = 'Something went wrong. Please try again.');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -99,11 +103,15 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       );
       if (mounted) {
         _notes.clear();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logged for today.')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Logged for today.')));
       }
       await _load();
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -116,8 +124,12 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
         title: Text(title),
         content: Text(body),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('No')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Yes')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('No')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Yes')),
         ],
       ),
     );
@@ -127,7 +139,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
   Future<void> _complete() async {
     final ok = await _confirm(
       'Complete this experiment?',
-      'The results will be evaluated against the baseline. This is final.',
+      'The results will be evaluated against your baseline. This is final.',
     );
     if (!ok || !mounted) return;
     setState(() => _busy = true);
@@ -135,21 +147,28 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       await _repo.complete(widget.experimentId);
       await _load();
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _cancel() async {
-    final ok = await _confirm('Cancel this experiment?', 'The current run is cancelled and will not be evaluated.');
+    final ok = await _confirm(
+        'Cancel this experiment?', 'The current run is cancelled and will not be evaluated.');
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
       await _repo.cancel(widget.experimentId);
       if (mounted) Navigator.of(context).pop();
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -161,11 +180,17 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       final res = accept
           ? await _repo.acceptCandidate(candidateId)
           : await _repo.rejectCandidate(candidateId);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(res.message)));
+      }
       final candidate = await _repo.learningCandidateFor(widget.experimentId);
       if (mounted) setState(() => _candidate = candidate);
     } on ApiException catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(e.message)));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -178,102 +203,147 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off, size: 40),
-                      const SizedBox(height: 12),
-                      Text(_error!),
-                      const SizedBox(height: 12),
-                      FilledButton(onPressed: _load, child: const Text('Retry')),
-                    ],
-                  ),
-                )
+              ? ErrorState(message: _error!, onRetry: _load)
               : _detail == null
                   ? const SizedBox.shrink()
-                  : _detail!.experiment.status == 'running'
+                  : _detail!.experiment.status == 'active'
                       ? _buildActive(context)
                       : _buildResult(context),
     );
   }
 
   // --- Running experiment ---------------------------------------------------
+
   Widget _buildActive(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final detail = _detail!;
     final exp = detail.experiment;
+    final daysLeft =
+        exp.endDate.difference(detail.today).inDays.clamp(0, exp.durationDays);
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(exp.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          Text(exp.title,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
-          Text(exp.hypothesis, style: TextStyle(color: scheme.onSurfaceVariant)),
-          const SizedBox(height: 14),
-          LinearProgressIndicator(value: detail.progressPercent / 100),
-          const SizedBox(height: 6),
-          Text(
-            'Day ${detail.daysInto} of ${exp.durationDays}',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
+          Text(exp.hypothesis,
+              style: TextStyle(color: scheme.onSurfaceVariant)),
           const SizedBox(height: 18),
-          Card(
-            color: scheme.surfaceContainerLow,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          Center(
+            child: ProgressRing(
+              value: detail.progressPercent / 100,
+              size: 120,
+              strokeWidth: 11,
+              center: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Log today', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 4),
-                  Text('Target: ${detail.target ?? exp.intervention}', style: TextStyle(color: scheme.onSurfaceVariant)),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Met the target today'),
-                    value: _targetMet,
-                    onChanged: (v) => setState(() => _targetMet = v),
-                  ),
-                  Text('Energy', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-                  Slider(value: _energy.toDouble(), min: 1, max: 10, divisions: 9, label: '$_energy', onChanged: (v) => setState(() => _energy = v.round())),
-                  Text('Stress', style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
-                  Slider(value: _stress.toDouble(), min: 1, max: 5, divisions: 4, label: '$_stress', onChanged: (v) => setState(() => _stress = v.round())),
-                  TextField(
-                    controller: _notes,
-                    maxLines: 2,
-                    maxLength: 1000,
-                    decoration: const InputDecoration(
-                      labelText: 'Notes (optional)',
-                      border: OutlineInputBorder(),
-                      counterText: '',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: _busy ? null : _submitLog,
-                      child: Text(_busy ? 'Saving...' : 'Save today\'s log'),
-                    ),
-                  ),
+                  Text('Day ${detail.daysInto}',
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.w800)),
+                  Text('of ${exp.durationDays}',
+                      style: TextStyle(
+                          fontSize: 11, color: scheme.onSurfaceVariant)),
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          Center(
+            child: Text(
+              daysLeft == 0
+                  ? 'Final day \u2014 complete when ready'
+                  : '$daysLeft day${daysLeft == 1 ? '' : 's'} remaining',
+              style: TextStyle(fontSize: 12.5, color: scheme.onSurfaceVariant),
+            ),
+          ),
+          const SizedBox(height: 18),
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Log today',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 4),
+                Text('Target: ${detail.target ?? exp.intervention}',
+                    style: TextStyle(color: scheme.onSurfaceVariant)),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Met the target today'),
+                  value: _targetMet,
+                  onChanged: (v) => setState(() => _targetMet = v),
+                ),
+                Text('Energy (optional)',
+                    style: TextStyle(
+                        fontSize: 13, color: scheme.onSurfaceVariant)),
+                Slider(
+                  value: _energy.toDouble(),
+                  min: 1,
+                  max: 10,
+                  divisions: 9,
+                  label: '$_energy',
+                  onChanged: (v) => setState(() => _energy = v.round()),
+                ),
+                Text('Stress (optional)',
+                    style: TextStyle(
+                        fontSize: 13, color: scheme.onSurfaceVariant)),
+                Slider(
+                  value: _stress.toDouble(),
+                  min: 1,
+                  max: 5,
+                  divisions: 4,
+                  label: '$_stress',
+                  onChanged: (v) => setState(() => _stress = v.round()),
+                ),
+                TextField(
+                  controller: _notes,
+                  maxLines: 2,
+                  maxLength: 1000,
+                  decoration: const InputDecoration(
+                    labelText: 'Notes (optional)',
+                    border: OutlineInputBorder(),
+                    counterText: '',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: _busy ? null : _submitLog,
+                    child: Text(_busy ? 'Saving...' : 'Save today\u2019s log'),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 18),
           if (detail.dailyLogs.isNotEmpty) ...[
-            Text('Logged days', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            Text('Logged days',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800)),
             const SizedBox(height: 8),
             ...detail.dailyLogs.reversed.map(
               (log) => ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(log.completed && (log.targetMet ?? false) ? Icons.check_circle : Icons.remove_circle_outline,
-                    color: (log.targetMet ?? false) ? Colors.green : scheme.onSurfaceVariant),
+                leading: Icon(
+                  log.completed && (log.targetMet ?? false)
+                      ? Icons.check_circle
+                      : Icons.remove_circle_outline,
+                  color: (log.targetMet ?? false)
+                      ? Colors.green
+                      : scheme.onSurfaceVariant,
+                ),
                 title: Text(AppDateUtils.fullDay(log.date)),
-                subtitle: log.notes == null || log.notes!.isEmpty ? null : Text(log.notes!),
-                trailing: log.dayNumber != null ? Text('Day ${log.dayNumber}') : null,
+                subtitle: log.notes == null || log.notes!.isEmpty
+                    ? null
+                    : Text(log.notes!),
+                trailing: log.dayNumber != null
+                    ? Text('Day ${log.dayNumber}')
+                    : null,
               ),
             ),
           ],
@@ -302,6 +372,7 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
   }
 
   // --- Completed experiment --------------------------------------------------
+
   Widget _buildResult(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final exp = _detail!.experiment;
@@ -311,7 +382,9 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       child: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          Text(exp.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          Text(exp.title,
+              style:
+                  const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text(
             '${exp.status} on ${exp.completedAt == null ? AppDateUtils.shortDay(exp.endDate) : AppDateUtils.shortDay(exp.completedAt!.toLocal())}',
@@ -321,7 +394,9 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
           if (result != null) ...[
             _ResultHeader(result: result),
             const SizedBox(height: 16),
-            Text('Results', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            Text('Results',
+                style:
+                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             const SizedBox(height: 8),
             if (result.metrics.isEmpty)
               Text(
@@ -332,30 +407,32 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
               ...result.metrics.map(
                 (m) => Padding(
                   padding: const EdgeInsets.only(bottom: 10),
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  m.metric.replaceAll('_', ' ').toUpperCase(),
-                                  style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                                ),
+                  child: AppCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                m.metric.replaceAll('_', ' ').toUpperCase(),
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700, fontSize: 13),
                               ),
-                              _directionIcon(scheme, m.direction),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          _statRow('Baseline', _fmt(m.baselineMean), _fmt(m.baselineMedian)),
-                          _statRow('Experiment', _fmt(m.experimentMean), _fmt(m.experimentMedian)),
-                          if (m.percentageChange != null)
-                            _statRow('Change', '${m.percentageChange!.toStringAsFixed(0)}%', '(n=${m.validObservations})'),
-                        ],
-                      ),
+                            ),
+                            _directionIcon(scheme, m.direction),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _statRow('Baseline', _fmt(m.baselineMean),
+                            _fmt(m.baselineMedian)),
+                        _statRow('Experiment', _fmt(m.experimentMean),
+                            _fmt(m.experimentMedian)),
+                        if (m.percentageChange != null)
+                          _statRow('Change',
+                              '${m.percentageChange!.toStringAsFixed(0)}%',
+                              '(n=${m.validObservations})'),
+                      ],
                     ),
                   ),
                 ),
@@ -363,17 +440,25 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
             const SizedBox(height: 12),
             if (result.summary.isNotEmpty) ...[
               _sectionTitle('Summary', scheme),
-              Text(result.summary, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 14)),
+              Text(result.summary,
+                  style: TextStyle(
+                      color: scheme.onSurfaceVariant, fontSize: 14)),
             ],
             if (result.limitations.isNotEmpty) ...[
               const SizedBox(height: 12),
               _sectionTitle('Limitations', scheme),
-              Text(result.limitations, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13, fontStyle: FontStyle.italic)),
+              Text(result.limitations,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontStyle: FontStyle.italic,
+                      color: scheme.onSurfaceVariant)),
             ],
             const SizedBox(height: 8),
             Text(
-              'These are observations from your own data - correlation only, not a diagnosis or proof of cause and effect.',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
+              'These are observations from your own data \u2014 correlation only, not a diagnosis or proof of cause and effect.',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: scheme.onSurfaceVariant.withValues(alpha: 0.8)),
             ),
             const SizedBox(height: 16),
             if (_candidate != null)
@@ -392,7 +477,10 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
 
   Widget _sectionTitle(String text, ColorScheme scheme) => Text(
         text,
-        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: scheme.onSurfaceVariant),
+        style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+            color: scheme.onSurfaceVariant),
       );
 
   Widget _statRow(String label, String mean, String median) {
@@ -402,10 +490,14 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
         children: [
           SizedBox(
             width: 100,
-            child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 13, fontWeight: FontWeight.w600)),
           ),
           Expanded(child: Text(mean, style: const TextStyle(fontSize: 13))),
-          Expanded(child: Text('median $median', style: const TextStyle(fontSize: 12))),
+          Expanded(
+              child: Text('median $median',
+                  style: const TextStyle(fontSize: 12))),
         ],
       ),
     );
@@ -424,7 +516,8 @@ class _ExperimentDetailScreenState extends State<ExperimentDetailScreen> {
       children: [
         Icon(data.$1, size: 16, color: data.$2),
         const SizedBox(width: 4),
-        Text(direction.replaceAll('_', ''), style: TextStyle(fontSize: 11, color: data.$2)),
+        Text(direction.replaceAll('_', ''),
+            style: TextStyle(fontSize: 11, color: data.$2)),
       ],
     );
   }
@@ -438,50 +531,53 @@ class _ResultHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final adherence = result.targetAdherenceText ?? (result.targetAdherence == null ? null : '${(result.targetAdherence! * 100).round()}%');
-    return Card(
-      color: scheme.surfaceContainerLow,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                _pill(scheme, 'Evidence: ${result.evidenceLevel.replaceAll('_', ' ')}', scheme.primary),
-                const SizedBox(width: 8),
-                if (result.consistencyScore != null)
-                  _pill(scheme, 'Consistency ${result.consistencyScore!.toStringAsFixed(0)}/100', scheme.secondary),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text('Target adherence: ${adherence ?? '\u2014'}', style: const TextStyle(fontSize: 13)),
-            Text('Sample: ${result.sampleSize} valid days', style: const TextStyle(fontSize: 13)),
-            const SizedBox(height: 6),
-            Text(
-              'Causality: ${result.causalityProven ? 'not proven (observation only)' : 'not proven - correlation only'}',
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ),
+    final adherence = result.targetAdherenceText ??
+        (result.targetAdherence == null
+            ? null
+            : '${(result.targetAdherence! * 100).round()}%');
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              EvidenceBadge(level: result.evidenceLevel),
+              if (result.consistencyScore != null)
+                StatusBadge(
+                  label:
+                      'Consistency ${result.consistencyScore!.toStringAsFixed(0)}/100',
+                  color: scheme.secondary,
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text('Target adherence: ${adherence ?? '\u2014'}',
+              style: const TextStyle(fontSize: 13)),
+          Text('Sample: ${result.sampleSize} valid days',
+              style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 6),
+          Text(
+            'Observation only \u2014 causality is never claimed.',
+            style: TextStyle(
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+                color: scheme.onSurfaceVariant),
+          ),
+        ],
       ),
-    );
-  }
-
-  Widget _pill(ColorScheme scheme, String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Text(text, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
     );
   }
 }
 
 class _CandidateCard extends StatelessWidget {
-  const _CandidateCard({required this.candidate, required this.busy, required this.onAccept, required this.onReject});
+  const _CandidateCard({
+    required this.candidate,
+    required this.busy,
+    required this.onAccept,
+    required this.onReject,
+  });
 
   final LearningCandidate candidate;
   final bool busy;
@@ -493,53 +589,66 @@ class _CandidateCard extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final change = candidate.observedChange;
     final note = change['direction'] ?? change['summary'] ?? '';
-    return Card(
-      color: scheme.tertiaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Pattern worth remembering?', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: scheme.onTertiaryContainer)),
-            const SizedBox(height: 6),
-            Text(
-              '${candidate.patternType} appeared to relate to "${candidate.intervention}".'
-              '${note is String && note.isNotEmpty ? ' $note' : ''}',
-              style: TextStyle(color: scheme.onTertiaryContainer, fontSize: 13.5),
+    return AppCard(
+      color: scheme.tertiaryContainer.withValues(alpha: 0.5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Pattern worth remembering?',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: scheme.onTertiaryContainer)),
+          const SizedBox(height: 6),
+          Text(
+            '${candidate.patternType} appeared to relate to "${candidate.intervention}".'
+            '${note is String && note.isNotEmpty ? ' $note' : ''}',
+            style: TextStyle(
+                color: scheme.onTertiaryContainer, fontSize: 13.5),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Evidence level: ${candidate.evidenceLevel.replaceAll('_', ' ')}',
+            style: TextStyle(
+                fontSize: 12,
+                color: scheme.onTertiaryContainer.withValues(alpha: 0.7)),
+          ),
+          if (candidate.status == 'candidate') ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                      onPressed: busy ? null : onReject,
+                      child: const Text('Not for me')),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                      onPressed: busy ? null : onAccept,
+                      child: const Text('Keep it')),
+                ),
+              ],
             ),
             const SizedBox(height: 4),
             Text(
-              'Evidence level: ${candidate.evidenceLevel.replaceAll('_', ' ')}',
-              style: TextStyle(fontSize: 12, color: scheme.onTertiaryContainer.withValues(alpha: 0.7)),
+              'Keeping it feeds your "What works for me" profile. Nothing here is medical advice.',
+              style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onTertiaryContainer.withValues(alpha: 0.7)),
             ),
-            if (candidate.status == 'candidate') ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(onPressed: busy ? null : onReject, child: const Text('Not for me')),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: FilledButton(onPressed: busy ? null : onAccept, child: const Text('Keep it')),
-                  ),
-                ],
+          ] else
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'Status: ${candidate.status}',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: scheme.onTertiaryContainer),
               ),
-              const SizedBox(height: 4),
-              Text(
-                'Keeping it feeds your "What works for me" learning profile. Nothing here is medical advice.',
-                style: TextStyle(fontSize: 11, color: scheme.onTertiaryContainer.withValues(alpha: 0.7)),
-              ),
-            ] else
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  'Status: ${candidate.status}',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.onTertiaryContainer),
-                ),
-              ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }

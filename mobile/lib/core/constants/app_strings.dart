@@ -58,7 +58,8 @@ class AppStrings {
   // Onboarding - goals
   static const String goalTitle = 'What would you like to improve?';
   static const String goalSubtitle =
-      'Select everything that matters to you. You can change this anytime.';
+      'Pick the one that matters most to you right now. You can change it anytime.';
+  static const String goalSelectionHint = 'Select one area to continue.';
 
   // Onboarding - routine
   static const String routineTitle = 'Tell us about your daily routine';

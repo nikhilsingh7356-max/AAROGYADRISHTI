@@ -42,8 +42,8 @@ _STATUS_TO_CODE = {
     status.HTTP_404_NOT_FOUND: CODE_NOT_FOUND,
     status.HTTP_405_METHOD_NOT_ALLOWED: CODE_BAD_REQUEST,
     status.HTTP_409_CONFLICT: CODE_CONFLICT,
-    status.HTTP_413_CONTENT_TOO_LARGE: CODE_PAYLOAD_TOO_LARGE,
-    status.HTTP_422_UNPROCESSABLE_CONTENT: CODE_UNPROCESSABLE,
+    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE: CODE_PAYLOAD_TOO_LARGE,
+    status.HTTP_422_UNPROCESSABLE_ENTITY: CODE_UNPROCESSABLE,
     status.HTTP_429_TOO_MANY_REQUESTS: CODE_RATE_LIMITED,
     status.HTTP_503_SERVICE_UNAVAILABLE: CODE_SERVICE_UNAVAILABLE,
 }
@@ -88,7 +88,7 @@ class BadRequestError(AppError):
 
 
 class ValidationFailedError(AppError):
-    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
     code = CODE_VALIDATION_ERROR
     default_message = "Some of the information provided is not valid."
 
@@ -153,7 +153,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             for error in exc.errors()
         ]
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             content=error_body(
                 CODE_VALIDATION_ERROR,
                 "Some of the information provided is not valid.",

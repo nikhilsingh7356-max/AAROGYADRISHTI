@@ -9,8 +9,10 @@ import 'package:health/health.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants/app_strings.dart';
+import '../../repositories/health_repository.dart';
 import '../../services/health_connect_service.dart';
 import '../../widgets/selection_card.dart';
+import '../../app.dart';
 import 'onboarding_controller.dart';
 
 class HealthPermissionScreen extends StatefulWidget {
@@ -25,7 +27,9 @@ class _HealthPermissionScreenState extends State<HealthPermissionScreen> {
   bool _supported = false;
   bool _requesting = false;
   bool _granted = false;
+  bool _linking = false;
   String? _error;
+  String? _linkError;
 
   final _service = HealthConnectService.instance;
 
@@ -68,10 +72,31 @@ class _HealthPermissionScreenState extends State<HealthPermissionScreen> {
               ]);
         }
       });
+      if (granted) await _link();
     } catch (_) {
       if (mounted) setState(() => _error = AppStrings.somethingWentWrong);
     } finally {
       if (mounted) setState(() => _requesting = false);
+    }
+  }
+
+  /// Record the connection on the backend so dashboard syncs are enabled.
+  /// Best-effort: if it fails while offline, the user can retry below.
+  Future<void> _link() async {
+    setState(() {
+      _linking = true;
+      _linkError = null;
+    });
+    try {
+      await HealthRepository(AppServices.instance.api).connect(
+        steps: true,
+        sleep: true,
+        activity: true,
+      );
+    } catch (_) {
+      if (mounted) setState(() => _linkError = AppStrings.noInternet);
+    } finally {
+      if (mounted) setState(() => _linking = false);
     }
   }
 
@@ -143,6 +168,34 @@ class _HealthPermissionScreenState extends State<HealthPermissionScreen> {
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 14, color: scheme.onSecondaryContainer, height: 1.5),
                   ),
+                  const SizedBox(height: 12),
+                  if (_linking)
+                    const SizedBox(
+                      height: 14,
+                      width: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else if (_linkError != null)
+                    Column(
+                      children: [
+                        Text(
+                          _linkError!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 13, color: scheme.error),
+                        ),
+                        const SizedBox(height: 6),
+                        TextButton(
+                          onPressed: _link,
+                          child: const Text('Retry linking'),
+                        ),
+                      ],
+                    )
+                  else
+                    Text(
+                      'Linked to your dashboard',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: scheme.primary),
+                    ),
                 ],
               ),
             ),
