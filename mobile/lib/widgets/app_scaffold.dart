@@ -33,7 +33,7 @@ class _AppScaffoldState extends State<AppScaffold> {
   }
 
   late final List<Widget> _screens = [
-    HomeScreen(onOpenProfile: _openProfile),
+    HomeScreen(onOpenProfile: _openProfile, onOpenTab: _openTab),
     const CheckinTab(),
     const InsightsScreen(),
     const ExperimentsScreen(),

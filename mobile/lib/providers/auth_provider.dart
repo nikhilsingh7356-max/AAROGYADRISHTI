@@ -177,11 +177,33 @@ class AuthProvider extends ChangeNotifier {
     } catch (_) {
       // Server logout is best-effort; local logout always succeeds.
     }
+    await _clearLocalSession(userId);
+    return null;
+  }
+
+  /// Permanently delete the signed-in account on the server, then clear the
+  /// local session. Throws if the server refuses so the UI can surface errors.
+  Future<Null> deleteAccount() async {
+    final userId = _user?.id;
+    await _repository.deleteAccount();
+    await _clearLocalSession(userId, serverAlreadyLoggedOut: true);
+    return null;
+  }
+
+  /// Shared local cleanup used by both logout() and deleteAccount().
+  Future<void> _clearLocalSession(int? userId, {bool serverAlreadyLoggedOut = false}) async {
     await _storage.clearTokens();
     if (userId != null) {
       // Clear this user's onboarding cache so it can't leak across accounts
       // on a shared device.
       await _storage.remove('${AppConstants.keyOnboardingCompleted}_$userId');
+    }
+    if (!serverAlreadyLoggedOut) {
+      try {
+        await _repository.logout();
+      } catch (_) {
+        // Server logout is best-effort; local logout always succeeds.
+      }
     }
     await firebase_auth.FirebaseAuth.instance.signOut();
     await _googleSignIn.signOut();
@@ -189,7 +211,6 @@ class AuthProvider extends ChangeNotifier {
     _user = null;
     _status = AuthStatus.unauthenticated;
     notifyListeners();
-    return null;
   }
 
   String _friendly(Object e) {

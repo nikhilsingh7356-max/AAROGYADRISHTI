@@ -14,6 +14,42 @@ import 'providers/auth_provider.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/profile_repository.dart';
 
+enum AppThemePreference { system, light, dark }
+
+class ThemeController extends ChangeNotifier {
+  ThemeController() {
+    _load();
+  }
+
+  AppThemePreference _preference = AppThemePreference.system;
+  AppThemePreference get preference => _preference;
+
+  ThemeMode get themeMode => switch (_preference) {
+        AppThemePreference.light => ThemeMode.light,
+        AppThemePreference.dark => ThemeMode.dark,
+        AppThemePreference.system => ThemeMode.system,
+      };
+
+  Future<void> _load() async {
+    final raw = await StorageService.instance.getString(AppConstants.keyThemeMode);
+    if (raw == null) return;
+    for (final pref in AppThemePreference.values) {
+      if (pref.name == raw && pref != _preference) {
+        _preference = pref;
+        notifyListeners();
+        break;
+      }
+    }
+  }
+
+  Future<void> setPreference(AppThemePreference pref) async {
+    if (pref == _preference) return;
+    _preference = pref;
+    notifyListeners();
+    await StorageService.instance.setString(AppConstants.keyThemeMode, pref.name);
+  }
+}
+
 /// Singleton data-layer container exposed through the widget tree.
 ///
 /// All repositories share ONE `ApiClient` so a session token set after login
@@ -46,6 +82,7 @@ class AarogyaDrishtiApp extends StatefulWidget {
 
 class _AarogyaDrishtiAppState extends State<AarogyaDrishtiApp> {
   late final AuthProvider _auth;
+  late final ThemeController _theme;
 
   @override
   void initState() {
@@ -55,19 +92,34 @@ class _AarogyaDrishtiAppState extends State<AarogyaDrishtiApp> {
       svc.authRepository,
       storage: StorageService.instance,
     );
+    _theme = ThemeController();
+  }
+
+  @override
+  void dispose() {
+    _theme.dispose();
+    _auth.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider<AuthProvider>.value(
-      value: _auth,
-      child: MaterialApp(
-        title: AppConstants.appName,
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        darkTheme: AppTheme.dark(),
-        themeMode: ThemeMode.system,
-        home: const SplashScreen(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AuthProvider>.value(value: _auth),
+        ChangeNotifierProvider<ThemeController>.value(value: _theme),
+      ],
+      child: Consumer<ThemeController>(
+        builder: (context, themeCtrl, _) {
+          return MaterialApp(
+            title: AppConstants.appName,
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            themeMode: themeCtrl.themeMode,
+            home: const SplashScreen(),
+          );
+        },
       ),
     );
   }

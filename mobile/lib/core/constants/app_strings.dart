@@ -7,7 +7,7 @@ class AppStrings {
 
   // Brand
   static const String appName = 'AarogyaDrishti';
-  static const String tagline = 'Track. Understand. Prevent.';
+  static const String tagline = 'See Your Habits. Shape Your Health.';
 
   // Welcome
   static const String welcomeTitle = 'Understand your everyday habits';
@@ -139,6 +139,23 @@ class AppStrings {
   static const String connectedHealthData = 'Connected Health Data';
   static const String privacy = 'Privacy';
   static const String notifications = 'Notifications';
+  static const String appearance = 'Appearance';
+  static const String appearanceSubtitle = 'Light, dark or follow your system';
+  static const String themeFollowSystem = 'Follow system';
+  static const String themeLight = 'Light';
+  static const String themeDark = 'Dark';
+  static const String notificationsSubtitle = 'Choose when to get check-in nudges';
+  static const String reminderTitle = 'Daily check-in reminder';
+  static const String reminderBody = 'A gentle nudge to log your day (saved on this device only).';
+  static const String reminderTimeLabel = 'Reminder time';
+  static const String privacySubtitle = 'Choose which data categories you are OK sharing';
+  static const String consentBody = 'Explicit consent is recorded on the server. Revoking a category stops future use; already-saved data stays in your account.';
+  static const String dataControlsTitle = 'Your data';
+  static const String deleteAccountConfirmTitle = 'Delete your account?';
+  static const String deleteAccountConfirmBody = 'This permanently deletes your account and every daily log, experiment, learning and conversation. This cannot be undone.';
+  static const String deleteAccountDone = 'Your account has been deleted. Thank you for trying AarogyaDrishti.';
+  static const String settingsTitle = 'Settings';
+  static const String privacySettings = 'Privacy & consent';
   static const String preferences = 'Preferences';
   static const String aboutApp = 'About AarogyaDrishti';
   static const String edit = 'Edit';

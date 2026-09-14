@@ -15,8 +15,11 @@ class AppConstants {
   AppConstants._();
 
   static const String appName = 'AarogyaDrishti';
-  static const String tagline = 'Track. Understand. Prevent.';
+  static const String tagline = 'See Your Habits. Shape Your Health.';
   static const String phase = 'Phase 6';
+
+  /// Displayed on the profile About tile. Keep in sync with pubspec.yaml.
+  static const String appVersion = '0.1.0';
 
   /// Origin of the FastAPI backend. Override this for local development.
   static const String apiBaseUrl = String.fromEnvironment(
@@ -49,6 +52,9 @@ class AppConstants {
   static const String keyRoutineActivity = 'routine_activity_level';
   static const String keyRoutineWater = 'routine_water_intake';
   static const String keyRoutineStress = 'routine_stress_level';
+  static const String keyThemeMode = 'theme_mode';
+  static const String keyReminderEnabled = 'reminder_enabled';
+  static const String keyReminderTime = 'reminder_time';
 }
 
 /// 8px baseline spacing system.

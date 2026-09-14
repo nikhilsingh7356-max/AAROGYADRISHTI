@@ -13,4 +13,11 @@ class ConsentRepository {
   Future<void> record(String dataType, bool given) async {
     await _api.post(_prefix, body: {'data_type': dataType, 'consent_given': given});
   }
+
+  /// Server-side consent status (mirrors `ConsentStatus` schema:
+  /// steps / sleep / activity / screen_time / demographic_optional).
+  Future<Map<String, bool>> status() async {
+    final data = await _api.get(_prefix) as Map<String, dynamic>;
+    return data.map((k, v) => MapEntry(k, v == true));
+  }
 }

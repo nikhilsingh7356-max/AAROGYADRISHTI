@@ -18,4 +18,7 @@ class AppDateUtils {
 
   /// e.g. "2025-09-11" - the wire date format used by the API.
   static String toIso(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
+
+  /// e.g. "14:05"
+  static String timeLabel(DateTime date) => DateFormat('HH:mm').format(date);
 }

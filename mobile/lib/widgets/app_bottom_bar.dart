@@ -1,4 +1,4 @@
-/// Custom bottom navigation bar for AarogyaDrishti.
+/// Floating pill bottom navigation bar for AarogyaDrishti.
 ///
 /// New IA: Home / Check-in / Insights / Experiments / Coach.
 /// Profile is reached from the Home header (per the information architecture).
@@ -28,10 +28,8 @@ const List<AppTab> kAppTabs = [
   AppTab(index: 4, label: 'Coach', icon: Icons.chat_bubble_outline_rounded, selectedIcon: Icons.chat_bubble_rounded),
 ];
 
-/// A single destination inside [AppBottomBar].
-class AppBottomBarDestination extends StatelessWidget {
-  const AppBottomBarDestination({
-    super.key,
+class _PillDestination extends StatelessWidget {
+  const _PillDestination({
     required this.tab,
     required this.selected,
     required this.onTap,
@@ -44,43 +42,41 @@ class AppBottomBarDestination extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Expanded(
-      child: Semantics(
-        selected: selected,
-        button: true,
-        child: InkResponse(
-          onTap: onTap,
-          radius: 40,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOutCubic,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                decoration: BoxDecoration(
-                  color: selected ? scheme.primaryContainer : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  selected ? tab.selectedIcon : tab.icon,
-                  size: 23,
-                  color: selected ? scheme.primary : scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 3),
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? scheme.primary.withValues(alpha: 0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              selected ? tab.selectedIcon : tab.icon,
+              size: 22,
+              color: selected ? scheme.primary : scheme.onSurfaceVariant,
+            ),
+            if (selected) ...[
+              const SizedBox(width: 6),
               Text(
                 tab.label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected ? scheme.primary : scheme.onSurfaceVariant,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
                 ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -97,46 +93,58 @@ class AppBottomBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
 
-  static const double _height = 62;
+  static const double _height = 56;
+  static const double _horizontalMargin = 20;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainer,
-      elevation: 0,
+    final bottom = MediaQuery.paddingOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        _horizontalMargin,
+        0,
+        _horizontalMargin,
+        bottom == 0 ? 12 : 8,
+      ),
       child: Container(
+        height: _height,
         decoration: BoxDecoration(
-          color: scheme.surfaceContainer,
-          border: Border(
-            top: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.7), width: 1),
+          color: scheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: 0.5),
+            width: 1,
           ),
-        ),
-        child: SafeArea(
-          top: false,
-          minimum: const EdgeInsets.only(bottom: 6),
-          child: SizedBox(
-            height: _height,
-            child: Row(
-              children: [
-                for (final tab in kAppTabs)
-                  AppBottomBarDestination(
-                    tab: tab,
-                    selected: currentIndex == tab.index,
-                    onTap: () => onTap(tab.index),
-                  ),
-              ],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
             ),
-          ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            for (final tab in kAppTabs)
+              _PillDestination(
+                tab: tab,
+                selected: currentIndex == tab.index,
+                onTap: () => onTap(tab.index),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Body padding helper so screens keep content clear of the bar.
+/// Body padding helper so screens keep content clear of the floating bar.
 EdgeInsets appBottomPadding(BuildContext context) {
+  final bottom = MediaQuery.paddingOf(context).bottom;
   return EdgeInsets.only(
-    bottom: AppBottomBar._height + MediaQuery.paddingOf(context).bottom + 24,
+    bottom: AppBottomBar._height + AppBottomBar._horizontalMargin + (bottom == 0 ? 12 : 8) + bottom + 16,
   );
 }

@@ -21,6 +21,7 @@ from app.schemas.common import Message
 from app.services.auth import (
     authenticate,
     authenticate_firebase,
+    delete_account,
     logout,
     refresh_access_token,
     register,
@@ -56,6 +57,15 @@ def auth_status(user: CurrentUser):
     return AuthStatusResponse(
         authenticated=True,
         user=UserResponse.model_validate(user),
+    )
+
+
+@router.delete("/me", response_model=Message)
+def delete_my_account(db: DbSession, user: CurrentUser):
+    """Permanently delete the signed-in account and every byte of its data."""
+    delete_account(db, user)
+    return Message(
+        message="Your account and all associated data have been permanently deleted."
     )
 
 

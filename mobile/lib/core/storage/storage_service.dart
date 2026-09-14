@@ -58,4 +58,14 @@ class StorageService {
     final sp = await _sp;
     await sp.remove(key);
   }
+
+  Future<void> setInt(String key, int value) async {
+    final sp = await _sp;
+    await sp.setInt(key, value);
+  }
+
+  Future<int?> getInt(String key) async {
+    final sp = await _sp;
+    return sp.getInt(key);
+  }
 }

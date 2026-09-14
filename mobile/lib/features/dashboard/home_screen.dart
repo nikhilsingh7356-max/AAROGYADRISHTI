@@ -28,14 +28,18 @@ import '../../widgets/primary_button.dart';
 import '../../widgets/progress_card.dart';
 import '../../widgets/section_header.dart';
 import '../../app.dart';
+import '../../features/health_connect/health_connect_screen.dart';
 import '../checkin/checkin_screen.dart';
 import '../history/history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.onOpenProfile});
+  const HomeScreen({super.key, this.onOpenProfile, this.onOpenTab});
 
   /// Invoked when the user taps the profile header avatar.
   final VoidCallback? onOpenProfile;
+
+  /// Invoked with a tab index to switch the AppScaffold's active tab.
+  final ValueChanged<int>? onOpenTab;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -171,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
             sliver: SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
               sliver: SliverToBoxAdapter(
-                  child: _header(scheme, auth, s)),
+                  child: _header(auth, s)),
             ),
           ),
           if (_healthNote == 'connect')
@@ -182,7 +186,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   icon: Icons.watch_rounded,
                   message:
                       'Health Connect is available but not linked yet. Link it from your profile to auto-fill steps, sleep and activity.',
-                  actionLabel: 'Link later',
+                  actionLabel: 'Link now',
+                  onAction: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                        builder: (_) => const HealthConnectScreen()),
+                  ),
                 ),
               ),
             ),
@@ -306,7 +314,10 @@ class _HomeScreenState extends State<HomeScreen> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
                 sliver: SliverToBoxAdapter(
-                  child: _NextActionCard(action: _nextAction!),
+                  child: _NextActionCard(
+                    action: _nextAction!,
+                    onTap: () => widget.onOpenTab?.call(4),
+                  ),
                 ),
               ),
             SliverPadding(
@@ -353,74 +364,95 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
           const SliverToBoxAdapter(
-              child: SizedBox(height: appBottomBarClearance)),
+              child: SizedBox(height: 80)),
         ],
       ),
     );
   }
 
-  Widget _header(ColorScheme scheme, AuthProvider auth, DashboardSummary? s) {
+  Widget _header(AuthProvider auth, DashboardSummary? s) {
     final user = auth.user;
     final firstName =
         (user?.name ?? user?.email ?? 'there').split(' ').first;
     final today = DateTime.now();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        InkWell(
-          onTap: widget.onOpenProfile,
-          borderRadius: BorderRadius.circular(999),
-          child: CircleAvatar(
-            radius: 21,
-            backgroundColor: scheme.primaryContainer,
-            child: Text(
-              firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
-              style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                  color: scheme.primary),
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.deepTeal, AppColors.emerald],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.deepTeal.withValues(alpha: 0.35),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          InkWell(
+            onTap: widget.onOpenProfile,
+            borderRadius: BorderRadius.circular(999),
+            child: CircleAvatar(
+              radius: 22,
+              backgroundColor: Colors.white.withValues(alpha: 0.25),
+              child: Text(
+                firstName.isNotEmpty ? firstName[0].toUpperCase() : '?',
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white),
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '$_greeting, $firstName',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${AppDateUtils.fullDay(today)} \u00b7 Let\u2019s see how your habits are looking',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: 12.5, color: scheme.onSurfaceVariant),
-              ),
-            ],
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$_greeting, $firstName',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                      color: Colors.white),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '${AppDateUtils.fullDay(today)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12.5,
+                      color: Colors.white.withValues(alpha: 0.85)),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        if (_refreshingHealth)
-          const SizedBox(
-            width: 18,
-            height: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
-          )
-        else
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _refreshAll,
-            icon: const Icon(Icons.refresh_rounded),
-          ),
-      ],
+          const SizedBox(width: 8),
+          if (_refreshingHealth)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Colors.white),
+            )
+          else
+            IconButton(
+              tooltip: 'Refresh',
+              onPressed: _refreshAll,
+              icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+            ),
+        ],
+      ),
     );
   }
 
@@ -493,9 +525,13 @@ class _TodayCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.55),
+        gradient: LinearGradient(
+          colors: [scheme.primaryContainer, scheme.secondaryContainer],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.2)),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.15)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -541,22 +577,16 @@ class _TodayCard extends StatelessWidget {
 }
 
 class _NextActionCard extends StatelessWidget {
-  const _NextActionCard({required this.action});
+  const _NextActionCard({required this.action, this.onTap});
 
   final NextAction action;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return AppCard(
-      onTap: () {
-        // The coach tab owns this flow; surfaced from home for convenience.
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(action.reason.isEmpty
-              ? action.heading
-              : action.reason)),
-        );
-      },
+      onTap: onTap,
       child: Row(
         children: [
           Container(

@@ -6,7 +6,7 @@ in one place and the auth provider (JWT today, Firebase tomorrow) stays swappabl
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -134,6 +134,77 @@ def reset_password(db: Session, token: str, new_password: str) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def delete_account(db: Session, user: User) -> None:
+    """Permanently delete a user and all of their data.
+
+    Rows are removed in explicit dependency order rather than relying on DB
+    cascade, so behaviour is identical on SQLite, Postgres and any future
+    backend. Several user-scoped tables (``daily_logs``,
+    ``coach_conversations``, ``personal_learnings``) keep plain integer
+    ``user_id`` columns with no FK - their rows MUST be deleted here before
+    the user row itself.
+    """
+    from app.models.coach import CoachConversation, CoachMessage
+    from app.models.consent import ConsentRecord
+    from app.models.daily_log import DailyLog
+    from app.models.evaluation import (
+        ExperimentEvidence,
+        ExperimentMetricResult,
+        LearningCandidate,
+    )
+    from app.models.experiment import Experiment, ExperimentDailyLog, ExperimentResult
+    from app.models.health import DailyHealthData, HealthConnection
+    from app.models.personal_learning import PersonalLearning, PersonalLearningEvidence
+
+    # --- Experiment subgraph (all keyed off the user's experiment ids). ------
+    experiment_ids = select(Experiment.id).where(Experiment.user_id == user.id)
+    db.execute(
+        delete(ExperimentDailyLog).where(ExperimentDailyLog.experiment_id.in_(experiment_ids))
+    )
+    db.execute(
+        delete(ExperimentMetricResult).where(
+            ExperimentMetricResult.experiment_id.in_(experiment_ids)
+        )
+    )
+    db.execute(
+        delete(ExperimentEvidence).where(ExperimentEvidence.experiment_id.in_(experiment_ids))
+    )
+    db.execute(
+        delete(ExperimentResult).where(ExperimentResult.experiment_id.in_(experiment_ids))
+    )
+    db.execute(delete(LearningCandidate).where(LearningCandidate.user_id == user.id))
+    db.execute(delete(Experiment).where(Experiment.user_id == user.id))
+
+    # --- Personal learnings (evidence references the learning rows). ---------
+    learning_ids = select(PersonalLearning.id).where(PersonalLearning.user_id == user.id)
+    db.execute(
+        delete(PersonalLearningEvidence).where(
+            PersonalLearningEvidence.learning_id.in_(learning_ids)
+        )
+    )
+    db.execute(delete(PersonalLearning).where(PersonalLearning.user_id == user.id))
+
+    # --- Coach conversations (messages reference the conversations). ---------
+    conversation_ids = select(CoachConversation.id).where(
+        CoachConversation.user_id == user.id
+    )
+    db.execute(
+        delete(CoachMessage).where(CoachMessage.conversation_id.in_(conversation_ids))
+    )
+    db.execute(delete(CoachConversation).where(CoachConversation.user_id == user.id))
+
+    # --- Remaining user-scoped records. --------------------------------------
+    db.execute(delete(DailyLog).where(DailyLog.user_id == user.id))
+    db.execute(delete(DailyHealthData).where(DailyHealthData.user_id == user.id))
+    db.execute(delete(HealthConnection).where(HealthConnection.user_id == user.id))
+    db.execute(delete(ConsentRecord).where(ConsentRecord.user_id == user.id))
+
+    if user.profile is not None:
+        db.delete(user.profile)
+    db.delete(user)
+    db.commit()
 
 
 def demo_seed_for(db: Session, user: User) -> None:

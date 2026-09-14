@@ -203,3 +203,54 @@ def test_refresh_token_rejected_in_query_string(client):
     # Passing the token as a query parameter is no longer supported.
     resp = client.post("/api/v1/auth/refresh", params={"refresh_token": refresh})
     assert resp.status_code == 422
+
+
+def test_delete_account_removes_all_data(client, auth_headers):
+    headers = auth_headers("delete@example.com")
+    # Create some data: a daily log and a Health Connect link + consent record.
+    log = client.post(
+        "/api/v1/daily-logs",
+        headers=headers,
+        json={"date": "2025-01-01", "energy": 7, "stress": 2, "source": "manual"},
+    )
+    assert log.status_code == 201, log.text
+    conn = client.post(
+        "/api/v1/health/connect",
+        headers=headers,
+        json={"provider": "health_connect", "steps_enabled": True, "sleep_enabled": True, "activity_enabled": True},
+    )
+    assert conn.status_code == 200, conn.text
+    assert client.post(
+        "/api/v1/consent", headers=headers, json={"data_type": "steps", "consent_given": True}
+    ).status_code == 201
+
+    resp = client.delete("/api/v1/auth/me", headers=headers)
+    assert resp.status_code == 200
+    assert "permanently deleted" in resp.json()["message"]
+
+    # The deleted user's token is dead.
+    dead = client.get("/api/v1/profile", headers=headers)
+    assert dead.status_code == 401
+
+    # The email is freed up - re-registration succeeds with a fresh account.
+    reg = client.post(
+        "/api/v1/auth/register",
+        json={"name": "Delete", "email": "delete@example.com", "password": "H3althy!Life"},
+    )
+    assert reg.status_code == 201, reg.text
+    new_headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    # No orphaned daily logs, health connections or consents for the new account.
+    assert client.get("/api/v1/daily-logs", headers=new_headers).json() == []
+    assert client.get("/api/v1/health/status", headers=new_headers).json() is None
+    assert client.get("/api/v1/consent", headers=new_headers).json() == {
+        "steps": False,
+        "sleep": False,
+        "activity": False,
+        "screen_time": False,
+        "demographic_optional": False,
+    }
+
+
+def test_delete_account_requires_token(client):
+    resp = client.delete("/api/v1/auth/me")
+    assert resp.status_code == 401

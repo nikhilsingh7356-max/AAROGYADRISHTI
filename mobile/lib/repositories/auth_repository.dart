@@ -38,6 +38,11 @@ class AuthRepository {
 
   Future<void> logout() async => _api.post('${AppConstants.apiV1Prefix}/auth/logout');
 
+  /// Permanently delete the signed-in account and all of its data.
+  Future<void> deleteAccount() async {
+    await _api.delete('${AppConstants.apiV1Prefix}/auth/me');
+  }
+
   Future<void> forgotPassword(String email) async {
     await _api.post('${AppConstants.apiV1Prefix}/auth/forgot-password', body: {'email': email});
   }
